@@ -3,7 +3,7 @@ import React, { useState } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { SessionAssetsProvider } from "../../lib/SessionAssetsContext.js";
 import { extractFrontmatter, formatRelativeDate, inferType } from "../FrontmatterProperties.js";
-import { isFencedBlockComplete, MarkdownContent, tableToMarkdown, tableToTsv } from "../MarkdownContent.js";
+import { isFencedBlockComplete, MarkdownContent, protectDollarsInMarkdown, tableToMarkdown, tableToTsv } from "../MarkdownContent.js";
 import { ThemeProvider } from "../ThemeProvider.js";
 import type { ToolContext } from "../tool-renderers/types.js";
 
@@ -539,6 +539,80 @@ describe("MarkdownContent", () => {
       // closing dollar arrives. Pre-fix this would throw a ParseError;
       // post-fix it must render without crashing.
       expect(() => renderMd("Working: $x = 10 +")).not.toThrow();
+    });
+  });
+
+  // latex-math-sanitize (#99): orphan `$` closers from LLM output must not
+  // pair with the next `$` and swallow the prose between them.
+  describe("malformed LaTeX math sanitizing", () => {
+    const REPRO =
+      "It will compute Binding Capture Mass Share (\\ / \\text{MW}$), NSA CTG Close Share from scratch without unweighted dollar distortions";
+
+    describe("protectDollarsInMarkdown", () => {
+      it("escapes the orphan closer in the issue repro and keeps trailing prose", () => {
+        const output = protectDollarsInMarkdown(REPRO);
+        expect(output).toContain("\\text{MW}\\$)");
+        expect(output).toContain(
+          "NSA CTG Close Share from scratch without unweighted dollar distortions",
+        );
+      });
+
+      it("escapes an orphan closer while leaving real inline math verbatim", () => {
+        const output = protectDollarsInMarkdown("Rate (\\ / \\text{MW}$), then $x^2$ holds.");
+        expect(output).toContain("\\text{MW}\\$)");
+        expect(output).toContain("$x^2$");
+      });
+
+      it("leaves genuine inline math untouched", () => {
+        const input = "Pythagoras: $a^2 + b^2 = c^2$.";
+        expect(protectDollarsInMarkdown(input)).toBe(input);
+      });
+
+      it("leaves escaped currency and adjacent math untouched", () => {
+        const input = "Total \\$100, where $x > 0$.";
+        expect(protectDollarsInMarkdown(input)).toBe(input);
+      });
+
+      it("leaves display math untouched", () => {
+        const input = "$$\n\\sum_{i=0}^{n} i\n$$";
+        expect(protectDollarsInMarkdown(input)).toBe(input);
+      });
+
+      it("leaves inline code spans untouched", () => {
+        const input = "Use `$100` and `\\text{MW}$` literally.";
+        expect(protectDollarsInMarkdown(input)).toBe(input);
+      });
+
+      it("leaves fenced code untouched", () => {
+        const input = "```text\n$100 and \\text{MW}$\n```";
+        expect(protectDollarsInMarkdown(input)).toBe(input);
+      });
+    });
+
+    it("renders the issue repro with all downstream prose intact and no KaTeX", () => {
+      const { container } = renderMd(REPRO);
+      expect(container.querySelector(".katex")).toBeNull();
+      expect(container.textContent).toContain(
+        "NSA CTG Close Share from scratch without unweighted dollar distortions",
+      );
+      expect(container.textContent).toContain("MW");
+    });
+
+    it("keeps an orphan closer from swallowing following real math", () => {
+      const { container } = renderMd("Rate (\\ / \\text{MW}$), then $x^2$ holds.");
+      const katex = container.querySelectorAll(".katex");
+      expect(katex).toHaveLength(1);
+      expect(katex[0]?.textContent).toContain("x");
+      expect(container.textContent).toContain("then");
+      expect(container.textContent).toContain("holds");
+    });
+
+    it("keeps two orphan closers from pairing with each other", () => {
+      const { container } = renderMd(
+        "Share (\\ / \\text{MW}$) and capacity (\\ / \\text{GW}$) both moved this week.",
+      );
+      expect(container.querySelector(".katex")).toBeNull();
+      expect(container.textContent).toContain("both moved this week");
     });
   });
 
