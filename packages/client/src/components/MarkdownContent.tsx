@@ -242,8 +242,71 @@ function containsTeXMarker(content: string, start: number, end: number): boolean
   return false;
 }
 
-/** Escape numeric currency markers without disabling single-dollar TeX math. */
-function protectCurrencyInMarkdown(content: string): string {
+/** Text-mode TeX macros whose braced argument is math, not prose. */
+const TEX_TEXT_MACRO =
+  /\\(?:text|textbf|textit|textrm|textsf|texttt|mathrm|mathbf|mathit|mathsf|mathtt|operatorname)\s*\{[^{}]*\}/g;
+
+/**
+ * Count prose-looking words (>=2 letters) after stripping TeX macros. The
+ * *argument* of a text-mode macro (`\text{Binding Capture Mass Share}`) is
+ * well-formed math notation, not prose, so it is stripped whole before words
+ * are counted — otherwise the app's own domain vocabulary trips the veto.
+ */
+function proseWordCount(inner: string): number {
+  return (
+    inner
+      .replace(TEX_TEXT_MACRO, " ")
+      .replace(/\\[A-Za-z]+/g, " ")
+      .match(/[A-Za-z]{2,}/g) ?? []
+  ).length;
+}
+
+/**
+ * True when the first bracket-ish delimiter in the span is a *closer*. Genuine
+ * math never opens with a dangling `)`/`}`; an orphaned LaTeX closer whose
+ * opening `$` the model dropped almost always does (`\text{MW}$), then …`).
+ */
+function opensWithUnbalancedCloser(inner: string): boolean {
+  for (let cursor = 0; cursor < inner.length; cursor++) {
+    const character = inner[cursor];
+    if (character === "\\") {
+      cursor++;
+      continue;
+    }
+    if (character === "(" || character === "{") return false;
+    if (character === ")" || character === "}") return true;
+  }
+  return false;
+}
+
+/**
+ * A `$…$` span is treated as math only when it looks like math. LLM output
+ * frequently drops the opening `$` of `\text{…}$`; without this test the
+ * orphan closer pairs with the next `$` and swallows the prose between them.
+ * `micromark-extension-math` accepts padded spans (`$ x^2 $`), so a whitespace
+ * edge only vetoes when the span also carries prose words.
+ */
+function isPlausibleInlineMath(inner: string): boolean {
+  if (inner.length === 0) return false;
+  if (inner.includes("\n\n")) return false; // crosses a block
+  if (opensWithUnbalancedCloser(inner)) return false; // orphaned closer
+  const words = proseWordCount(inner);
+  if (words >= 3) return false; // 3+ prose words => prose
+  if (words >= 1 && (/^\s/.test(inner) || /\s$/.test(inner))) return false; // prose spillover
+  return true;
+}
+
+/** Matches a raw-HTML tag or an angle autolink, where `\$` is not unescaped. */
+const RAW_TAG_OR_AUTOLINK = /^<[/!?a-zA-Z][^<>]*>/;
+
+/**
+ * Escape single `$` markers that cannot open a plausible inline-math span, so
+ * currency (`$100`) and orphan LaTeX closers (`\text{MW}$` with no opener) both
+ * render as literal dollar signs instead of swallowing downstream prose.
+ * Genuine `$…$` inline math, `$$…$$` display math, already-escaped `\$`,
+ * inline-code spans and fenced blocks are left verbatim.
+ */
+export function protectDollarsInMarkdown(content: string): string {
   const output: string[] = [];
   let cursor = 0;
 
@@ -269,17 +332,42 @@ function protectCurrencyInMarkdown(content: string): string {
       continue;
     }
 
-    if (content[cursor] === "$" && content[cursor - 1] !== "$" && content[cursor + 1] !== "$" && content[cursor + 1] >= "0" && content[cursor + 1] <= "9") {
+    // Backslash escapes are not processed inside raw HTML or autolinks, so a
+    // `\$` there is literal corruption of an attribute/href. Copy verbatim.
+    if (content[cursor] === "<") {
+      const tag = RAW_TAG_OR_AUTOLINK.exec(content.slice(cursor));
+      if (tag) {
+        output.push(tag[0]);
+        cursor += tag[0].length;
+        continue;
+      }
+    }
+
+    if (content.startsWith("http://", cursor) || content.startsWith("https://", cursor)) {
+      let end = cursor;
+      while (end < content.length && !/[\s<>`]/.test(content[end])) end++;
+      output.push(content.slice(cursor, end));
+      cursor = end;
+      continue;
+    }
+
+    if (content[cursor] === "$" && content[cursor - 1] !== "$" && content[cursor + 1] !== "$") {
       let backslashes = 0;
       for (let previous = cursor - 1; previous >= 0 && content[previous] === "\\"; previous--) backslashes++;
       if (backslashes % 2 === 0) {
+        const next = content[cursor + 1] ?? "";
+        const isCurrency = next >= "0" && next <= "9";
         const closing = matchingDollar(content, cursor + 1);
-        if (closing !== -1 && containsTeXMarker(content, cursor + 1, closing)) {
+        const isMath =
+          closing !== -1 &&
+          isPlausibleInlineMath(content.slice(cursor + 1, closing)) &&
+          (!isCurrency || containsTeXMarker(content, cursor + 1, closing));
+        if (isMath) {
           output.push(content.slice(cursor, closing + 1));
           cursor = closing + 1;
           continue;
         }
-        output.push("\\", content[cursor]);
+        output.push("\\", "$");
         cursor++;
         continue;
       }
@@ -508,7 +596,7 @@ function PiAssetImg(props: React.ImgHTMLAttributes<HTMLImageElement>) {
 export const MarkdownContent = React.memo(function MarkdownContent({ content, context, frontmatter = "hide" }: Props) {
   // ASCII table monospace fixer — disabled pending further refinement
   // const processedContent = useMemo(() => wrapAsciiTables(content), [content]);
-  const processedContent = useMemo(() => protectCurrencyInMarkdown(content), [content]);
+  const processedContent = useMemo(() => protectDollarsInMarkdown(content), [content]);
   const containerRef = useRef<HTMLDivElement>(null);
   const onLoopbackClick = useLoopbackLinkOpen();
   const { resolved: theme, themeName } = useThemeContext();
