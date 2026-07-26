@@ -14,7 +14,10 @@ export interface SeqEvent<T = DashboardEvent> {
   event: T;
 }
 
-export type EventWindowPreparationOptions = Pick<PrepareEventForReplayOptions, "registerInlineAsset" | "maxEventBytes">;
+export type EventWindowPreparationOptions = Pick<
+  PrepareEventForReplayOptions,
+  "registerInlineAsset" | "maxEventBytes" | "maxToolPayloadBytes"
+>;
 
 export interface EventWindowResult<T> {
   /** Selected events in ascending seq order. */
@@ -127,6 +130,7 @@ function prepareSingleEntry(
     maxEventBytes,
     maxTextBytes: maxEventBytes,
     registerInlineAsset: options.registerInlineAsset,
+    maxToolPayloadBytes: options.maxToolPayloadBytes,
   });
   const truncated = prepared.issues.some((issue) => issue.code === "event_truncated");
   return { prepared: { seq: entry.seq, event: prepared.event }, truncated };
@@ -157,10 +161,11 @@ function hasPreparedTurnStartBelow(
   source: readonly SeqEvent<DashboardEvent>[],
   suffixStart: number,
   perEventCap: number,
+  options: EventWindowPreparationOptions = {},
 ): boolean {
   for (let index = suffixStart - 1; index >= 0; index -= 1) {
     if (!isUserTurnStart(source[index]!)) continue;
-    const { prepared } = prepareSingleEntry(source[index]!, perEventCap, {});
+    const { prepared } = prepareSingleEntry(source[index]!, perEventCap, { maxToolPayloadBytes: options.maxToolPayloadBytes });
     if (isUserTurnStart(prepared)) return true;
   }
   return false;
@@ -308,7 +313,7 @@ export function selectNewestEventsByBudget(
   let suffixStart = source.length;
   let suffixBytes = 0;
   for (let index = source.length - 1; index >= 0; index -= 1) {
-    const { prepared, truncated } = prepareSingleEntry(source[index]!, perEventCap, {});
+    const { prepared, truncated } = prepareSingleEntry(source[index]!, perEventCap, { maxToolPayloadBytes: options.maxToolPayloadBytes });
     const size = estimateSeqEventBytes(prepared);
     if (suffixBytes + size > budget) break;
     if (truncated) truncatedSeqs.add(prepared.seq);
@@ -323,8 +328,8 @@ export function selectNewestEventsByBudget(
   // Mark a partial head only when the bounded suffix begins inside a turn.
   // A suffix beginning at a user message is already turn-aligned, even when
   // older complete turns exist below it.
-  const partialHead = selectionContainsTruncation(suffix, truncatedSeqs)
-    || (!isUserTurnStart(suffix[0]!) && hasPreparedTurnStartBelow(source, suffixStart, perEventCap));
+  const partialHead = truncatedSeqs.has(suffix[0]!.seq)
+    || (!isUserTurnStart(suffix[0]!) && hasPreparedTurnStartBelow(source, suffixStart, perEventCap, options));
   return finalizeSelectedEntries(
     source,
     suffix,

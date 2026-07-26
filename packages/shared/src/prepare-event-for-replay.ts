@@ -34,6 +34,7 @@ export interface InlineReplayAsset {
 export interface PrepareEventForReplayOptions {
   maxTextBytes?: number;
   maxEventBytes?: number;
+  maxToolPayloadBytes?: number;
   registerInlineAsset?: (asset: InlineReplayAsset) => string | undefined;
 }
 
@@ -445,6 +446,310 @@ function collectStringLocations(value: unknown, locations: StringLocation[]): vo
     }
   }
 }
+function truncateReplayJsonText(value: unknown, maxBytes: number | undefined, issues: ReplayPreparationIssue[]): string {
+  const source = String(value ?? "");
+  const limit = Number.isFinite(maxBytes) && maxBytes! > 0 ? Math.floor(maxBytes!) : Number.POSITIVE_INFINITY;
+  if (utf8ByteLength(JSON.stringify(source)) <= limit) return source;
+  let target = Math.max(1, limit - utf8ByteLength(JSON.stringify(REPLAY_BYTE_TRUNCATION_MARKER)));
+  for (let attempt = 0; attempt < 16; attempt += 1) {
+    const truncated = REPLAY_BYTE_TRUNCATION_MARKER + suffixWithinUtf8Budget(source, target);
+    if (utf8ByteLength(JSON.stringify(truncated)) <= limit) {
+      addIssue(issues, "event_truncated", "tool_payload_limit");
+      return truncated;
+    }
+    target = Math.max(1, Math.floor(target / 2));
+  }
+  addIssue(issues, "event_truncated", "tool_payload_limit");
+  return "";
+}
+
+function truncateContentBlocks(
+  blocks: unknown[],
+  budget: number,
+  issues: ReplayPreparationIssue[],
+): unknown[] {
+  const result: unknown[] = [];
+  let usedBytes = 2; // Base overhead for `[]`
+
+  for (const block of blocks) {
+    const commaBytes = result.length > 0 ? 1 : 0;
+    const itemBudget = budget - usedBytes - commaBytes;
+    if (itemBudget < 4) break;
+
+    if (block && typeof block === "object" && !Array.isArray(block)) {
+      const rec = block as Record<string, unknown>;
+      const cappedBlock: Record<string, unknown> = {};
+
+      if (typeof rec.type === "string") {
+        cappedBlock.type = rec.type;
+      }
+
+      if (typeof rec.text === "string") {
+        const emptyBlockBytes = utf8ByteLength(JSON.stringify({ ...cappedBlock, text: "" }));
+        const textBudget = itemBudget - (emptyBlockBytes - 2);
+        if (textBudget >= 4) {
+          cappedBlock.text = truncateReplayJsonText(rec.text, textBudget, issues);
+        } else {
+          cappedBlock.text = "";
+        }
+      }
+
+      for (const [k, v] of Object.entries(rec)) {
+        if (k === "type" || k === "text") continue;
+        if (typeof v === "number" || typeof v === "boolean" || v === null) {
+          cappedBlock[k] = v;
+        } else if (typeof v === "string") {
+          cappedBlock[k] = v.slice(0, 64);
+        }
+      }
+
+      const blockBytes = utf8ByteLength(JSON.stringify(cappedBlock));
+      if (commaBytes + blockBytes <= budget - usedBytes) {
+        result.push(cappedBlock);
+        usedBytes += commaBytes + blockBytes;
+      }
+    } else if (typeof block === "string") {
+      const cappedStr = truncateReplayJsonText(block, itemBudget, issues);
+      const strBytes = utf8ByteLength(JSON.stringify(cappedStr));
+      if (commaBytes + strBytes <= budget - usedBytes) {
+        result.push(cappedStr);
+        usedBytes += commaBytes + strBytes;
+      }
+    }
+  }
+
+  return result;
+}
+
+function truncateDetailsObject(
+  details: Record<string, unknown>,
+  budget: number,
+  issues: ReplayPreparationIssue[],
+): Record<string, unknown> {
+  const summaryDetails: Record<string, unknown> = { truncated: true };
+  let usedBytes = 18; // `{"truncated":true}` is 18 bytes
+
+  const allKeys = Object.keys(details);
+  const priorityKeys = [
+    "agentId",
+    "state",
+    "status",
+    "title",
+    "subagentType",
+    "modelName",
+    "displayName",
+    "activity",
+    "output",
+  ].filter((k) => Object.hasOwn(details, k));
+  const otherKeys = allKeys.filter((k) => !priorityKeys.includes(k) && k !== "truncated");
+  const orderedKeys = [...priorityKeys, ...otherKeys];
+
+  for (const key of orderedKeys) {
+    if (key === "truncated") continue;
+    const val = details[key];
+
+    const keyHeaderBytes = utf8ByteLength(JSON.stringify(key)) + 1;
+    const commaBytes = Object.keys(summaryDetails).length > 0 ? 1 : 0;
+    const itemBudget = budget - usedBytes - keyHeaderBytes - commaBytes;
+
+    if (itemBudget < 2) continue;
+
+    if (typeof val === "number" || typeof val === "boolean" || val === null) {
+      const valBytes = utf8ByteLength(JSON.stringify(val));
+      if (keyHeaderBytes + commaBytes + valBytes <= budget - usedBytes) {
+        summaryDetails[key] = val;
+        usedBytes += keyHeaderBytes + commaBytes + valBytes;
+      }
+    } else if (typeof val === "string") {
+      const capped = truncateReplayJsonText(val, itemBudget, issues);
+      const valBytes = utf8ByteLength(JSON.stringify(capped));
+      if (keyHeaderBytes + commaBytes + valBytes <= budget - usedBytes) {
+        summaryDetails[key] = capped;
+        usedBytes += keyHeaderBytes + commaBytes + valBytes;
+      }
+    }
+  }
+
+  if (utf8ByteLength(JSON.stringify(summaryDetails)) > budget) {
+    const minimal: Record<string, unknown> = { truncated: true };
+    if (typeof details.agentId === "string") {
+      minimal.agentId = details.agentId;
+    }
+    return minimal;
+  }
+
+  return summaryDetails;
+}
+
+function truncateObjectPayload(
+  record: Record<string, unknown>,
+  limit: number,
+  issues: ReplayPreparationIssue[],
+): Record<string, unknown> {
+  const summary: Record<string, unknown> = {};
+
+  const allKeys = Object.keys(record);
+  const priorityKeys = ["details", "content"].filter((k) => Object.hasOwn(record, k));
+  const otherKeys = allKeys.filter((k) => k !== "details" && k !== "content");
+  const orderedKeys = [...priorityKeys, ...otherKeys];
+
+  let usedBytes = 2; // `{}`
+
+  for (const key of orderedKeys) {
+    const val = record[key];
+
+    if (key === "details" && val && typeof val === "object" && !Array.isArray(val)) {
+      const detailsObj = val as Record<string, unknown>;
+      const keyHeaderBytes = utf8ByteLength(JSON.stringify("details")) + 1;
+      const commaBytes = Object.keys(summary).length > 0 ? 1 : 0;
+      const detailsBudget = limit - usedBytes - keyHeaderBytes - commaBytes;
+
+      if (detailsBudget >= 18) {
+        const summaryDetails = truncateDetailsObject(detailsObj, detailsBudget, issues);
+        summary.details = summaryDetails;
+        const detailsSerializedBytes = utf8ByteLength(JSON.stringify(summaryDetails));
+        usedBytes += keyHeaderBytes + commaBytes + detailsSerializedBytes;
+      }
+      continue;
+    }
+
+    if (key === "content" && val !== undefined) {
+      const keyHeaderBytes = utf8ByteLength(JSON.stringify("content")) + 1;
+      const commaBytes = Object.keys(summary).length > 0 ? 1 : 0;
+      const contentBudget = limit - usedBytes - keyHeaderBytes - commaBytes;
+
+      if (contentBudget >= 4) {
+        if (typeof val === "string") {
+          const cappedStr = truncateReplayJsonText(val, contentBudget, issues);
+          const cappedBytes = utf8ByteLength(JSON.stringify(cappedStr));
+          if (keyHeaderBytes + commaBytes + cappedBytes <= limit - usedBytes) {
+            summary.content = cappedStr;
+            usedBytes += keyHeaderBytes + commaBytes + cappedBytes;
+          }
+        } else if (Array.isArray(val)) {
+          const cappedArray = truncateContentBlocks(val, contentBudget, issues);
+          const cappedBytes = utf8ByteLength(JSON.stringify(cappedArray));
+          if (keyHeaderBytes + commaBytes + cappedBytes <= limit - usedBytes) {
+            summary.content = cappedArray;
+            usedBytes += keyHeaderBytes + commaBytes + cappedBytes;
+          }
+        } else {
+          const cappedVal = truncateReplayJsonText(val, contentBudget, issues);
+          const cappedBytes = utf8ByteLength(JSON.stringify(cappedVal));
+          if (keyHeaderBytes + commaBytes + cappedBytes <= limit - usedBytes) {
+            summary.content = cappedVal;
+            usedBytes += keyHeaderBytes + commaBytes + cappedBytes;
+          }
+        }
+      }
+      continue;
+    }
+
+    const keyHeaderBytes = utf8ByteLength(JSON.stringify(key)) + 1;
+    const commaBytes = Object.keys(summary).length > 0 ? 1 : 0;
+    const itemBudget = limit - usedBytes - keyHeaderBytes - commaBytes;
+
+    if (itemBudget < 2) continue;
+
+    if (typeof val === "number" || typeof val === "boolean" || val === null) {
+      const valBytes = utf8ByteLength(JSON.stringify(val));
+      if (keyHeaderBytes + commaBytes + valBytes <= limit - usedBytes) {
+        summary[key] = val;
+        usedBytes += keyHeaderBytes + commaBytes + valBytes;
+      }
+    } else if (typeof val === "string") {
+      const capped = truncateReplayJsonText(val, itemBudget, issues);
+      const valBytes = utf8ByteLength(JSON.stringify(capped));
+      if (keyHeaderBytes + commaBytes + valBytes <= limit - usedBytes) {
+        summary[key] = capped;
+        usedBytes += keyHeaderBytes + commaBytes + valBytes;
+      }
+    }
+  }
+
+  if (!summary.details && !Object.hasOwn(summary, "truncated")) {
+    const keyHeaderBytes = utf8ByteLength(JSON.stringify("truncated")) + 1;
+    const commaBytes = Object.keys(summary).length > 0 ? 1 : 0;
+    if (keyHeaderBytes + commaBytes + 4 <= limit - usedBytes) {
+      summary.truncated = true;
+    }
+  }
+
+  if (utf8ByteLength(JSON.stringify(summary)) > limit) {
+    const safeDetails: Record<string, unknown> = { truncated: true };
+    if (summary.details && typeof summary.details === "object") {
+      const detailsRec = summary.details as Record<string, unknown>;
+      if (typeof detailsRec.agentId === "string") {
+        safeDetails.agentId = detailsRec.agentId;
+      }
+    }
+    const safeSummary: Record<string, unknown> = { details: safeDetails };
+    if (summary.content !== undefined) {
+      const remForContent = limit - utf8ByteLength(JSON.stringify(safeSummary)) - 16;
+      if (remForContent >= 4) {
+        safeSummary.content = Array.isArray(summary.content)
+          ? truncateContentBlocks(summary.content, remForContent, issues)
+          : truncateReplayJsonText(summary.content, remForContent, issues);
+      }
+    }
+    return utf8ByteLength(JSON.stringify(safeSummary)) <= limit ? safeSummary : { details: { truncated: true } };
+  }
+
+  return summary;
+}
+
+function truncateArrayPayload(
+  array: unknown[],
+  limit: number,
+  issues: ReplayPreparationIssue[],
+): unknown[] {
+  const result: unknown[] = [];
+  let usedBytes = 2;
+
+  for (const item of array) {
+    const commaBytes = result.length > 0 ? 1 : 0;
+    const itemBudget = limit - usedBytes - commaBytes;
+    if (itemBudget < 4) break;
+
+    if (item && typeof item === "object") {
+      const summarized = truncateObjectPayload(item as Record<string, unknown>, itemBudget, issues);
+      const itemBytes = utf8ByteLength(JSON.stringify(summarized));
+      if (commaBytes + itemBytes <= limit - usedBytes) {
+        result.push(summarized);
+        usedBytes += commaBytes + itemBytes;
+      }
+    } else {
+      const capped = truncateReplayJsonText(item, itemBudget, issues);
+      const itemBytes = utf8ByteLength(JSON.stringify(capped));
+      if (commaBytes + itemBytes <= limit - usedBytes) {
+        result.push(capped);
+        usedBytes += commaBytes + itemBytes;
+      }
+    }
+  }
+
+  return result;
+}
+
+function truncateStructuredToolPayload(value: unknown, maxBytes: number | undefined, issues: ReplayPreparationIssue[]): unknown {
+  if (value === null || value === undefined || typeof value !== "object") {
+    return truncateReplayJsonText(value, maxBytes, issues);
+  }
+  const limit = Number.isFinite(maxBytes) && maxBytes! > 0 ? Math.floor(maxBytes!) : Number.POSITIVE_INFINITY;
+  let jsonString: string;
+  try {
+    jsonString = JSON.stringify(value);
+  } catch {
+    return truncateReplayText(value, maxBytes, issues);
+  }
+  if (utf8ByteLength(jsonString) <= limit) return value;
+  addIssue(issues, "event_truncated", "tool_payload_limit");
+  if (Array.isArray(value)) {
+    return truncateArrayPayload(value, limit, issues);
+  }
+  return truncateObjectPayload(value as Record<string, unknown>, limit, issues);
+}
+
 
 function boundEventBytes(
   event: DashboardEvent,
@@ -549,8 +854,12 @@ export function prepareEventForReplay(
     }
   }
 
+  const toolCap = options.maxToolPayloadBytes ?? options.maxTextBytes;
   if (envelope.eventType === "tool_execution_end" && Object.hasOwn(data, "result")) {
-    data.result = truncateReplayText(data.result, options.maxTextBytes, issues);
+    data.result = truncateStructuredToolPayload(data.result, toolCap, issues);
+  }
+  if (envelope.eventType === "tool_execution_update" && Object.hasOwn(data, "partialResult")) {
+    data.partialResult = truncateStructuredToolPayload(data.partialResult, toolCap, issues);
   }
 
   const preparedEvent = boundEventBytes(

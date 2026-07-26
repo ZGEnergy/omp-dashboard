@@ -1945,6 +1945,23 @@ export function reduceEvent(
           seq: stampMax(next.messages[messageIdx].seq, seq),
         };
       }
+      if (existingTool) {
+        next.toolCalls.set(toolCallId, {
+          ...existingTool,
+          seq: stampMax(existingTool.seq, seq),
+        });
+      }
+      if (messageIdx !== -1 && seq !== undefined) {
+        const current = next.messages[messageIdx];
+        const nextSeq = stampMax(current.seq, seq);
+        if (current.seq !== nextSeq) {
+          next.messages = [...next.messages];
+          next.messages[messageIdx] = {
+            ...current,
+            seq: nextSeq,
+          };
+        }
+      }
       const partialResult = data.partialResult;
       if (partialResult !== undefined) {
         next.messages = [...next.messages];
@@ -1973,12 +1990,6 @@ export function reduceEvent(
             result: truncateOutputForDisplay(String(partialResult)),
             seq: stampMax(current.seq, seq),
           };
-        }
-        if (existingTool) {
-          next.toolCalls.set(toolCallId, {
-            ...existingTool,
-            seq: stampMax(existingTool.seq, seq),
-          });
         }
       }
       break;

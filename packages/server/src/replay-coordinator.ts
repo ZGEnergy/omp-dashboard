@@ -104,6 +104,64 @@ function isToolOnlyAssistantMessage(data: Record<string, unknown> | undefined): 
 
 function compactStreamUpdates(entries: readonly StoredEvent[]): StoredEvent[] {
   const compacted = entries.slice();
+
+  // Pass 1: Coalesce tool_execution_update events by toolCallId
+  const toolCallIndices = new Map<string, number[]>();
+  const toolNames = new Map<string, string>();
+  for (let index = 0; index < compacted.length; index += 1) {
+    const event = compacted[index]!.event;
+    const eventType = event.eventType;
+    if (eventType.startsWith("tool_execution_")) {
+      const data = event.data as unknown as Record<string, unknown>;
+      const toolCallId = data.toolCallId;
+      if (typeof toolCallId === "string" && toolCallId.length > 0) {
+        if (typeof data.toolName === "string" && data.toolName.length > 0) toolNames.set(toolCallId, data.toolName);
+        let indices = toolCallIndices.get(toolCallId);
+        if (!indices) {
+          indices = [];
+          toolCallIndices.set(toolCallId, indices);
+        }
+        indices.push(index);
+      }
+    }
+  }
+
+  for (const indices of toolCallIndices.values()) {
+    let hasEnd = false;
+    let lastUpdateIdx = -1;
+    for (const idx of indices) {
+      const eventType = compacted[idx]!.event.eventType;
+      if (eventType === "tool_execution_end") {
+        hasEnd = true;
+      } else if (eventType === "tool_execution_update") {
+        lastUpdateIdx = idx;
+      }
+    }
+
+    for (const idx of indices) {
+      const entry = compacted[idx]!;
+      const event = entry.event;
+      if (event.eventType === "tool_execution_update") {
+        if (hasEnd || idx !== lastUpdateIdx) {
+          const data = event.data as unknown as Record<string, unknown>;
+          compacted[idx] = {
+            ...entry,
+            event: {
+              eventType: "tool_execution_update",
+              timestamp: event.timestamp,
+              data: {
+                toolCallId: data.toolCallId,
+                toolName: toolNames.get(data.toolCallId as string),
+                coalesced: true,
+              },
+            } as StoredEvent["event"],
+          };
+        }
+      }
+    }
+  }
+
+  // Pass 2: Compact text message_update stream events
   let latestTextUpdate: number | null = null;
   const noop = (index: number) => {
     const entry = compacted[index]!;
@@ -390,7 +448,7 @@ export function createReplayCoordinator(options: ReplayCoordinatorOptions): Repl
     const windowBudget = Math.max(1024, Math.min(budget, REPLAY_FRAME_BYTES - 2048));
     // Selection spans the whole window budget across as many frames as it
     // needs; a single event is still prepared (and accounted) at frame size.
-    const selectionOptions = { maxEventBytes: windowBudget };
+    const selectionOptions = { maxEventBytes: windowBudget, maxToolPayloadBytes: 20 * 1024 };
     const raw = compactStreamUpdates(options.store.getEvents(sessionId, 1));
     const retainedRange = options.store.getRetainedRange(sessionId);
     const needsPersistedPaging = retainedRange.historyTruncated && (retainedRange.retainedMinSeq ?? 1) > 1;
@@ -430,7 +488,7 @@ export function createReplayCoordinator(options: ReplayCoordinatorOptions): Repl
 
     const catchup = request.replayKind === "older" ? [] : options.store.getEvents(sessionId, snapshotMax + 1);
     const candidates = [...initial, ...catchup];
-    const preparedCandidates = candidates.map((entry) => ({ seq: entry.seq, event: prepareEventForReplay(entry.event, { maxEventBytes: windowBudget, maxTextBytes: windowBudget }).event }));
+    const preparedCandidates = candidates.map((entry) => ({ seq: entry.seq, event: prepareEventForReplay(entry.event, { maxEventBytes: windowBudget, maxTextBytes: windowBudget, maxToolPayloadBytes: 20 * 1024 }).event }));
     const terminalReserve = 1024;
     // A delta must stay a contiguous prefix of the client's missing range, so
     // it keeps the old drop-the-rest behavior; cold/older windows instead trim
@@ -457,7 +515,7 @@ export function createReplayCoordinator(options: ReplayCoordinatorOptions): Repl
     const inlineAssets = inlineAssetRegistrar(sessionId, ctx);
     const registerInlineAsset = inlineAssets.register;
     const finalPrepared = plannedEntries.map((entry) => {
-      const prepared = prepareEventForReplay(rawEventsBySeq.get(entry.seq) ?? entry.event, { maxEventBytes: windowBudget, maxTextBytes: windowBudget, registerInlineAsset });
+      const prepared = prepareEventForReplay(rawEventsBySeq.get(entry.seq) ?? entry.event, { maxEventBytes: windowBudget, maxTextBytes: windowBudget, maxToolPayloadBytes: 20 * 1024, registerInlineAsset });
       return { seq: entry.seq, event: prepared.event, assetHashes: prepared.assetHashes };
     });
     let preparedOffset = 0;
