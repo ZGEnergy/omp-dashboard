@@ -178,7 +178,11 @@ export function computeRowTextChars(item: DisplayRow): number {
 }
 
 function messageTextChars(m: ChatMessage): number {
-  return m.content.length + (m.result?.length ?? 0);
+  // A degraded row renders its stub slices instead of `result`; count them so
+  // the pre-measure estimate stays accurate.
+  // See change: hydration-tool-stub-projection.
+  const stubChars = (m.toolStub?.head?.length ?? 0) + (m.toolStub?.tail?.length ?? 0);
+  return m.content.length + (m.result?.length ?? 0) + stubChars;
 }
 
 function groupTextChars(g: ToolCallGroup): number {
