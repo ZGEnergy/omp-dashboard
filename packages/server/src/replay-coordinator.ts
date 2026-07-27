@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { BrowserToServerMessage, EventReplayMessage, ReplayErrorCode, ServerToBrowserMessage, SessionStateResetReason } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
-import { clampTailWindowBytes, selectNewestEventsByBudget, selectOlderEventsByBudget } from "@blackbelt-technology/pi-dashboard-shared/event-window.js";
+import { applyToolBudget, clampTailWindowBytes, selectNewestEventsByBudget, selectOlderEventsByBudget } from "@blackbelt-technology/pi-dashboard-shared/event-window.js";
 import { coalesceProjection } from "@blackbelt-technology/pi-dashboard-shared/replay-projection.js";
 import { prepareEventForReplay, utf8ByteLength } from "@blackbelt-technology/pi-dashboard-shared/prepare-event-for-replay.js";
 import type { WebSocket } from "ws";
@@ -83,6 +83,29 @@ function replayKindFor(msg: Extract<BrowserToServerMessage, { type: "subscribe" 
   if (msg.fromSeq != null && Number.isFinite(msg.fromSeq)) return "older";
   if ((msg.lastSeq ?? 0) > 0) return "delta";
   return "cold";
+}
+
+/**
+ * The single hydration projection entry point.
+ *
+ * Coalescing is safe for every replay kind — it only blanks superseded payloads
+ * in place. The tool BUDGET is applied only to windows that are actually
+ * byte-bounded (cold `tail` and `older` paging). A `delta` must stay a
+ * byte-faithful contiguous prefix of the client's missing range, and legacy
+ * `full` mode has no budget to enforce, so neither is degraded.
+ *
+ * Live streaming never reaches this function — `publishLive` sends raw events.
+ * See change: hydration-tool-stub-projection.
+ */
+export function projectForHydration(
+  events: readonly StoredEvent[],
+  budgetBytes: number,
+  replayKind: ReplayKind,
+  mode: "full" | "tail" | undefined,
+): StoredEvent[] {
+  const coalesced = coalesceProjection(events) as StoredEvent[];
+  const budgeted = replayKind === "older" || (replayKind === "cold" && mode === "tail");
+  return budgeted ? (applyToolBudget(coalesced, budgetBytes).events as StoredEvent[]) : coalesced;
 }
 
 export function createReplayCoordinator(options: ReplayCoordinatorOptions): ReplayCoordinator {
@@ -334,14 +357,14 @@ export function createReplayCoordinator(options: ReplayCoordinatorOptions): Repl
     // Selection spans the whole window budget across as many frames as it
     // needs; a single event is still prepared (and accounted) at frame size.
     const selectionOptions = { maxEventBytes: windowBudget };
-    const raw = coalesceProjection(options.store.getEvents(sessionId, 1)) as StoredEvent[];
+    const raw = projectForHydration(options.store.getEvents(sessionId, 1), budget, request.replayKind, msg.mode);
     const retainedRange = options.store.getRetainedRange(sessionId);
     const needsPersistedPaging = retainedRange.historyTruncated && (retainedRange.retainedMinSeq ?? 1) > 1;
     let persistedRaw: StoredEvent[] | undefined;
     if (needsPersistedPaging && (request.replayKind === "older" || (request.replayKind === "cold" && msg.mode === "tail"))) {
       const persisted = await loadPersistedSource(sessionId, ctx);
       if (!requestValid(state, request, ws)) return;
-      if (persisted.ok) persistedRaw = persisted.events ? coalesceProjection(persisted.events) as StoredEvent[] : undefined;
+      if (persisted.ok) persistedRaw = persisted.events ? projectForHydration(persisted.events, budget, request.replayKind, msg.mode) : undefined;
     }
     const snapshotMax = raw.at(-1)?.seq ?? 0;
     for (const [seq, { bytes }] of state.pendingLive) {
