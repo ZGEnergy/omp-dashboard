@@ -1,178 +1,118 @@
 import { describe, expect, it } from "vitest";
+import { prepareEventForReplay, utf8ByteLength } from "../prepare-event-for-replay.js";
 import type { DashboardEvent } from "../types.js";
-import {
-  DEFAULT_TAIL_WINDOW_BYTES,
-  selectNewestEventsByBudget,
-  type SeqEvent,
-} from "../event-window.js";
-import { prepareEventForReplay } from "../prepare-event-for-replay.js";
 
-describe("tool event payload capping and window selection", () => {
-  it("caps tool_execution_end and tool_execution_update result payload at maxToolPayloadBytes", () => {
-    const largeResult = "x".repeat(50_000);
-    const endEvent: DashboardEvent = {
+describe("event-window tool coalescing and agent field metadata preservation", () => {
+  it("bounds an oversized args payload with an empty terminal result, keeping event data <= 20 KiB and preserving useful args", () => {
+    const hugeContent = "X".repeat(50 * 1024); // 50 KiB string in args
+    const rawEvent: DashboardEvent = {
       eventType: "tool_execution_end",
-      timestamp: 1000,
-      data: { toolCallId: "call-1", toolName: "write", result: largeResult },
-    };
-
-    const prepared = prepareEventForReplay(endEvent, { maxToolPayloadBytes: 20 * 1024 });
-    const result = String(prepared.event.data.result);
-    expect(result.startsWith("«")).toBe(true);
-    expect(new TextEncoder().encode(result).byteLength).toBeLessThanOrEqual(20 * 1024 + 100);
-
-    const updateEvent: DashboardEvent = {
-      eventType: "tool_execution_update",
-      timestamp: 900,
-      data: { toolCallId: "call-1", toolName: "write", partialResult: largeResult },
-    };
-
-    const preparedUpdate = prepareEventForReplay(updateEvent, { maxToolPayloadBytes: 20 * 1024 });
-    const partialResult = String(preparedUpdate.event.data.partialResult);
-    expect(partialResult.startsWith("«")).toBe(true);
-    expect(new TextEncoder().encode(partialResult).byteLength).toBeLessThanOrEqual(20 * 1024 + 100);
-  });
-
-  it("caps nested partial-result text without flattening tool details", () => {
-    const event: DashboardEvent = {
-      eventType: "tool_execution_update",
-      timestamp: 1000,
+      timestamp: 1700000000000,
       data: {
-        toolCallId: "call-1",
-        toolName: "Agent",
-        partialResult: { details: { state: "running", output: "x".repeat(50_000) } },
-      },
-    };
-
-    const prepared = prepareEventForReplay(event, { maxToolPayloadBytes: 20 * 1024 });
-    const partialResult = prepared.event.data.partialResult as { details?: { state?: string; output?: string } };
-    expect(partialResult.details?.state).toBe("running");
-    expect(partialResult.details?.output?.startsWith("«")).toBe(true);
-    expect(new TextEncoder().encode(JSON.stringify(partialResult)).byteLength).toBeLessThanOrEqual(20 * 1024 + 100);
-  });
-
-  it("summarizes structurally oversized details without exceeding the cap", () => {
-    const entries = Object.fromEntries(Array.from({ length: 5_000 }, (_, index) => [`entry-${index}`, "value"]));
-    const event: DashboardEvent = {
-      eventType: "tool_execution_update",
-      timestamp: 1000,
-      data: { toolCallId: "call-1", toolName: "Agent", partialResult: { details: { state: "running", entries } } },
-    };
-
-    const prepared = prepareEventForReplay(event, { maxToolPayloadBytes: 20 * 1024 });
-    const partialResult = prepared.event.data.partialResult as { details?: { state?: string; truncated?: boolean } };
-    expect(partialResult.details).toMatchObject({ state: "running", truncated: true });
-    expect(new TextEncoder().encode(JSON.stringify(partialResult)).byteLength).toBeLessThanOrEqual(20 * 1024);
-  });
-  it("applies serialized-byte-safe truncation to quote-heavy tool_execution_end result", () => {
-    const quoteHeavyResult = '"'.repeat(30_000);
-    const endEvent: DashboardEvent = {
-      eventType: "tool_execution_end",
-      timestamp: 1000,
-      data: {
-        toolCallId: "call-quote-heavy",
-        toolName: "bash",
-        result: quoteHeavyResult,
-      },
-    };
-
-    const prepared = prepareEventForReplay(endEvent, { maxToolPayloadBytes: 20 * 1024 });
-    const result = String(prepared.event.data.result);
-    expect(result.startsWith("«")).toBe(true);
-    expect(new TextEncoder().encode(JSON.stringify(result)).byteLength).toBeLessThanOrEqual(20 * 1024);
-  });
-
-  it("retains agentId in details when summarizing structurally oversized details", () => {
-    const entries = Object.fromEntries(Array.from({ length: 5_000 }, (_, index) => [`entry-${index}`, "value"]));
-    const event: DashboardEvent = {
-      eventType: "tool_execution_update",
-      timestamp: 1000,
-      data: {
-        toolCallId: "call-subagent",
-        partialResult: {
-          details: { agentId: "subagent-spec-1", state: "running", ...entries },
+        toolCallId: "call_write_file_001",
+        toolName: "write",
+        args: {
+          path: "src/large_file.ts",
+          content: hugeContent,
+          mode: "overwrite",
         },
+        result: {},
       },
     };
 
-    const prepared = prepareEventForReplay(event, { maxToolPayloadBytes: 20 * 1024 });
-    const partialResult = prepared.event.data.partialResult as { details?: { agentId?: string; state?: string; truncated?: boolean } };
-    expect(partialResult.details).toMatchObject({ agentId: "subagent-spec-1", state: "running", truncated: true });
-    expect(new TextEncoder().encode(JSON.stringify(partialResult)).byteLength).toBeLessThanOrEqual(20 * 1024);
-  });
-
-  it("retains top-level object shape and content in bounded form when summarizing oversized payload", () => {
-    const event: DashboardEvent = {
-      eventType: "tool_execution_update",
-      timestamp: 1000,
-      data: {
-        toolCallId: "call-content",
-        partialResult: {
-          details: { agentId: "subagent-spec-2", state: "running" },
-          content: [{ type: "text", text: "z".repeat(50_000) }],
-          extraLarge: "w".repeat(50_000),
-        },
-      },
-    };
-
-    const prepared = prepareEventForReplay(event, { maxToolPayloadBytes: 20 * 1024 });
-    const partialResult = prepared.event.data.partialResult as {
-      details?: { agentId?: string; state?: string };
-      content?: Array<{ type?: string; text?: string }>;
-    };
-    expect(partialResult.details?.agentId).toBe("subagent-spec-2");
-    expect(partialResult.details?.state).toBe("running");
-    expect(Array.isArray(partialResult.content)).toBe(true);
-    expect(partialResult.content?.[0]?.type).toBe("text");
-    expect(partialResult.content?.[0]?.text?.startsWith("«")).toBe(true);
-    expect(new TextEncoder().encode(JSON.stringify(partialResult)).byteLength).toBeLessThanOrEqual(20 * 1024);
-  });
-
-  it("keeps a user-turn boundary after capping tool payloads", () => {
-    const events: SeqEvent<DashboardEvent>[] = [
-      {
-        seq: 1,
-        event: {
-          eventType: "message_start",
-          timestamp: 100,
-          data: { message: { role: "user", content: "Please run the task" } },
-        },
-      },
-      {
-        seq: 2,
-        event: {
-          eventType: "message_start",
-          timestamp: 110,
-          data: { message: { role: "assistant" } },
-        },
-      },
-    ];
-
-    let seq = 3;
-    for (let tool = 1; tool <= 10; tool += 1) {
-      const toolCallId = `call-${tool}`;
-      for (let update = 0; update < 50; update += 1) {
-        events.push({
-          seq: seq++,
-          event: { eventType: "tool_execution_update", timestamp: 100 + seq, data: { toolCallId, coalesced: true } },
-        });
-      }
-      events.push({
-        seq: seq++,
-        event: {
-          eventType: "tool_execution_update",
-          timestamp: 100 + seq,
-          data: { toolCallId, toolName: "bash", partialResult: "y".repeat(50_000) },
-        },
-      });
-    }
-
-    const window = selectNewestEventsByBudget(events, DEFAULT_TAIL_WINDOW_BYTES, {
-      maxToolPayloadBytes: 20 * 1024,
+    const capBytes = 20 * 1024; // 20 KiB limit
+    const prepared = prepareEventForReplay(rawEvent, {
+      maxEventBytes: capBytes,
+      maxTextBytes: capBytes,
     });
 
-    expect(window.events).toHaveLength(512);
-    expect(window.events[0]?.seq).toBe(1);
-    expect(window.partialHead).toBe(false);
+    const serializedDataBytes = utf8ByteLength(JSON.stringify(prepared.event.data));
+    const serializedTotalBytes = utf8ByteLength(JSON.stringify(prepared.event));
+
+    // Must satisfy total event data <= 20 KiB cap
+    expect(serializedDataBytes).toBeLessThanOrEqual(capBytes);
+    expect(serializedTotalBytes).toBeLessThanOrEqual(capBytes);
+
+    // Data must not be wiped out to fallback
+    expect(prepared.event.data).not.toHaveProperty("replayUnavailable");
+
+    const data = prepared.event.data as Record<string, unknown>;
+    const args = data.args as Record<string, unknown>;
+    expect(data.toolCallId).toBe("call_write_file_001");
+    expect(data.toolName).toBe("write");
+    expect(data.result).toEqual({});
+
+    // Useful bounded args must remain intact
+    expect(data.args).toBeDefined();
+    expect(args.path).toBe("src/large_file.ts");
+    expect(args.mode).toBe("overwrite");
+    expect(typeof args.content).toBe("string");
+    expect((args.content as string).length).toBeLessThan(hugeContent.length);
+  });
+
+  it("preserves every Agent field rendered as visible status/stat/error metadata when summarization truncates oversized details", () => {
+    const hugeDetailsPayload = "D".repeat(80 * 1024); // 80 KiB oversized details payload
+    const agentArgs = {
+      description: "Running subagent task for background execution",
+      toolUses: 14,
+      tokens: "8.4k",
+      turnCount: 6,
+      maxTurns: 15,
+      durationMs: 42000,
+      tags: ["subagent", "background-worker"],
+      error: "Subagent process failed with exit code 1",
+      details: {
+        tokensUsage: { inputTokens: 1200, outputTokens: 450, totalTokens: 1650 },
+        agentMdPath: "/path/to/agent.md",
+        hugeLogs: hugeDetailsPayload,
+      },
+    };
+
+    const rawEvent: DashboardEvent = {
+      eventType: "tool_execution_end",
+      timestamp: 1700000001000,
+      data: {
+        toolCallId: "call_agent_subtask_999",
+        toolName: "Agent",
+        args: agentArgs,
+        result: {},
+      },
+    };
+
+    const capBytes = 20 * 1024; // 20 KiB cap
+    const prepared = prepareEventForReplay(rawEvent, {
+      maxEventBytes: capBytes,
+      maxTextBytes: capBytes,
+      maxToolPayloadBytes: capBytes,
+    });
+
+    const serializedDataBytes = utf8ByteLength(JSON.stringify(prepared.event.data));
+    expect(serializedDataBytes).toBeLessThanOrEqual(capBytes);
+
+    // Verify event data is preserved (not replaced with replayUnavailable)
+    expect(prepared.event.data).not.toHaveProperty("replayUnavailable");
+
+    const data = prepared.event.data as Record<string, unknown>;
+    expect(data.args).toBeDefined();
+    const args = data.args as Record<string, unknown>;
+
+    // Verify every single visible Agent metadata field survives:
+    expect(args.description).toBe("Running subagent task for background execution");
+    expect(args.toolUses).toBe(14);
+    expect(args.tokens).toBe("8.4k");
+    expect(args.turnCount).toBe(6);
+    expect(args.maxTurns).toBe(15);
+    expect(args.durationMs).toBe(42000);
+    expect(args.tags).toEqual(["subagent", "background-worker"]);
+    expect(args.error).toBe("Subagent process failed with exit code 1");
+
+    // Verify details metadata fields survive tool payload capping
+    expect(args.details).toBeDefined();
+    const details = args.details as Record<string, unknown>;
+    expect(details.tokensUsage).toEqual({ inputTokens: 1200, outputTokens: 450, totalTokens: 1650 });
+    expect(details.agentMdPath).toBe("/path/to/agent.md");
+
+    // Oversized details payload was truncated/summarized
+    expect(utf8ByteLength(JSON.stringify(args.details))).toBeLessThan(utf8ByteLength(hugeDetailsPayload));
   });
 });

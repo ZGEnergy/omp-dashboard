@@ -874,7 +874,6 @@ export default function App() {
       apply: (sessionId, entries) => {
         const source = controller.ledger(sessionId).sourceGeneration ?? undefined;
         sourceGenerationRef.current.set(sessionId, source ?? sourceGenerationRef.current.get(sessionId) ?? "");
-        persisterFor(sessionId, source)?.record(sessionId, [...entries]);
         const accepted = [...entries];
         setSessionStates((prev) => {
           const next = new Map(prev);
@@ -887,6 +886,16 @@ export default function App() {
           const last = accepted[accepted.length - 1]!;
           maxSeqMapRef.current.set(sessionId, Math.max(maxSeqMapRef.current.get(sessionId) ?? 0, last.seq));
           publishSessionEvents(sessionId, accepted.map((entry) => entry.event));
+        }
+      },
+      persist: (sessionId, events, skippedRanges, mode) => {
+        const source = controller.ledger(sessionId).sourceGeneration ?? sourceGenerationRef.current.get(sessionId);
+        const persister = persisterFor(sessionId, source);
+        if (!persister) return;
+        if (mode === "append") {
+          persister.record(sessionId, [...events], [...skippedRanges]);
+        } else if (mode === "replace") {
+          persister.seed(sessionId, [...events], [...skippedRanges]);
         }
       },
       window: (sessionId, metadata: ReplayWindowMetadata) => {
@@ -909,9 +918,6 @@ export default function App() {
         setHistoryWindowMap((previous) => new Map(previous).set(sessionId, next));
       },
       replace: (sessionId, entries, completion) => {
-        const source = controller.ledger(sessionId).sourceGeneration ?? sourceGenerationRef.current.get(sessionId);
-        const persister = persisterFor(sessionId, source);
-        persister?.seed(sessionId, [...entries]);
         setSessionStates((prev) => {
           const next = new Map(prev);
           const previous = next.get(sessionId);
@@ -1401,8 +1407,7 @@ export default function App() {
       void rehydrateSession(sid, replayCache, { authority }).then((r) => {
         if (!r || abort.signal.aborted || r.sourceGeneration !== source || !authority.isCurrent()) return;
         const ledger = replayController.ledger(sid);
-        if (ledger.events.length > 0 || !replayController.seedCached(sid, source, r.events)) return;
-        // Cache actually seeded — override the provisional "stream" recorded by
+        if (ledger.events.length > 0 || !replayController.seedCached(sid, source, r.events, r.skippedSeqRanges)) return;
         // the cold beginReplay above. See change: hot-window-metrics.
         hydrationStateRef.current.set(sid, { source: "cache" });
         const stateAtAdmission = sessionStatesRef.current.get(sid);
@@ -1422,7 +1427,7 @@ export default function App() {
         });
         clearSessionEvents(sid);
         publishSessionEvents(sid, r.events.map((entry) => entry.event));
-        persister.seed(sid, r.events);
+        persister.seed(sid, r.events, r.skippedSeqRanges);
         maxSeqMapRef.current.set(sid, r.lastSeq);
         historyWindowRef.current.set(sid, { minSeq: r.minSeq, hasMoreOlder: r.hasMoreOlder, partialHead: r.partialHead });
         setHistoryWindowMap((prev) => new Map(prev).set(sid, { minSeq: r.minSeq, hasMoreOlder: r.hasMoreOlder, partialHead: r.partialHead }));

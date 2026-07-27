@@ -29,68 +29,44 @@ function socket(): TestSocket {
 }
 
 describe("replay coordinator tool burst hydration", () => {
-  it("delivers full chat context with contiguous seqs for a 1,285-event tail burst", async () => {
+  it("hydrates chat before a tool burst without charging superseded raw updates", async () => {
     const store = createMemoryEventStore(() => false);
     const sessionId = "session-tool-burst";
+    const events: DashboardEvent[] = [
+      {
+        eventType: "message_start",
+        timestamp: 1000,
+        data: { message: { role: "user", content: "Implement feature X" } },
+      },
+      {
+        eventType: "message_start",
+        timestamp: 1010,
+        data: { message: { role: "assistant" } },
+      },
+    ];
 
-    const events: DashboardEvent[] = [];
-
-    // seq 1: User prompt
-    events.push({
-      eventType: "message_start",
-      timestamp: 1000,
-      data: { message: { role: "user", content: "Implement feature X" } },
-    });
-
-    // seq 2: Assistant turn start
-    events.push({
-      eventType: "message_start",
-      timestamp: 1010,
-      data: { message: { role: "assistant" } },
-    });
-
-    // Create 12 tool calls, each having 1 start, ~76 updates (each 50 KB), and 1 end
-    // Total events: 2 + 12 * (1 + 76 + 1) = 2 + 12 * 78 = 938... Let's make it 1,285 events total!
-    let totalEventsCount = 2; // seq 1 and 2
-    for (let t = 1; t <= 12; t++) {
-      const toolCallId = `call-${t}`;
+    for (let tool = 1; tool <= 8; tool += 1) {
+      const toolCallId = `call-${tool}`;
       events.push({
         eventType: "tool_execution_start",
-        timestamp: 1010 + totalEventsCount,
-        data: { toolCallId, toolName: "bash", args: { command: `echo ${t}` } },
+        timestamp: 1100 + events.length,
+        data: { toolCallId, toolName: "bash", args: { command: `echo ${tool}` } },
       });
-      totalEventsCount++;
-
-      // 104 updates for calls 1-11, 115 updates for call 12 -> total 1285 events
-      const updatesForThisCall = t === 12 ? 115 : 104;
-      for (let u = 0; u < updatesForThisCall; u++) {
+      for (let update = 0; update < 2_000; update += 1) {
         events.push({
           eventType: "tool_execution_update",
-          timestamp: 1010 + totalEventsCount,
-          data: {
-            toolCallId,
-            toolName: "bash",
-            partialResult: "z".repeat(50_000),
-          },
+          timestamp: 1100 + events.length,
+          data: { toolCallId, toolName: "bash", partialResult: "z".repeat(1_024) },
         });
-        totalEventsCount++;
       }
-
       events.push({
         eventType: "tool_execution_end",
-        timestamp: 1010 + totalEventsCount,
-        data: {
-          toolCallId,
-          toolName: "bash",
-          result: "output".repeat(10_000),
-        },
+        timestamp: 1100 + events.length,
+        data: { toolCallId, toolName: "bash", result: "output".repeat(10_000) },
       });
-      totalEventsCount++;
     }
 
-    expect(events.length).toBe(1285);
     store.replaceEvents(sessionId, events);
-
     const ws = socket();
     const coordinator = createReplayCoordinator({ store });
     const ctx = {
@@ -113,29 +89,39 @@ describe("replay coordinator tool burst hydration", () => {
         sessionId,
         requestId: "req-burst",
         mode: "tail",
-        windowBytes: 1_572_864, // 1.5 MiB
+        windowBytes: 1_572_864,
       },
       ctx as unknown as Parameters<typeof coordinator.subscribe>[1],
     );
 
-    const replayFrames = ws.frames.filter((f) => f.type === "event_replay");
-    expect(replayFrames.length).toBeGreaterThan(0);
+    const replayFrames = ws.frames.filter((frame) => frame.type === "event_replay");
+    const delivered = replayFrames.flatMap((frame) => frame.events as Array<{ seq: number; event: DashboardEvent }>);
+    const skipped = replayFrames.flatMap((frame) => (frame.skippedSeqRanges ?? []) as Array<{ fromSeq: number; toSeq: number }>);
+    const coverage = [
+      ...delivered.map(({ seq }) => ({ fromSeq: seq, toSeq: seq })),
+      ...skipped,
+    ].sort((left, right) => left.fromSeq - right.fromSeq);
 
-    // Collect all delivered event entries across frames (excluding terminal empty frame)
-    const deliveredEntries = replayFrames.flatMap((f) => (f.events as Array<{ seq: number; event: DashboardEvent }>));
-    expect(deliveredEntries.length).toBe(1285);
-
-    // Verify strict sequence contiguity from 1 to 1285
-    for (let i = 0; i < deliveredEntries.length; i++) {
-      expect(deliveredEntries[i].seq).toBe(i + 1);
+    expect(delivered).toHaveLength(10);
+    expect(delivered[0]).toMatchObject({
+      event: { eventType: "message_start", data: { message: { role: "user" } } },
+    });
+    expect(coverage[0]?.fromSeq).toBe(1);
+    expect(coverage.at(-1)?.toSeq).toBe(events.length);
+    for (let index = 1; index < coverage.length; index += 1) {
+      expect(coverage[index]?.fromSeq).toBe(coverage[index - 1]!.toSeq + 1);
     }
+    expect(delivered.filter(({ event }) => event.eventType.startsWith("tool_execution_"))).toHaveLength(8);
+    expect(delivered.some(({ event }) => event.data.coalesced === true)).toBe(false);
 
-    // Verify seq 1 is the initial user prompt and was NOT truncated/dropped
-    const firstEvent = deliveredEntries[0]?.event;
-    expect(firstEvent?.eventType).toBe("message_start");
-    expect((firstEvent?.data as { message?: { role?: string } }).message?.role).toBe("user");
-
-    const terminalFrame = replayFrames.at(-1);
-    expect(terminalFrame?.partialHead).toBe(false);
+    const terminal = replayFrames.at(-1);
+    expect(terminal).toMatchObject({
+      isLast: true,
+      windowMinSeq: 1,
+      windowMaxSeq: events.length,
+      hasMoreOlder: false,
+      partialHead: false,
+    });
+    expect(ws.frames.reduce((bytes, frame) => bytes + Buffer.byteLength(JSON.stringify(frame)), 0)).toBeLessThanOrEqual(1_572_864);
   });
 });

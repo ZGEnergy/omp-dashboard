@@ -1,5 +1,8 @@
-import { prepareEventForReplay, utf8ByteLength, type PrepareEventForReplayOptions } from "./prepare-event-for-replay.js";
+import type { SkippedSeqRange } from "./browser-protocol.js";
+import { type PrepareEventForReplayOptions, prepareEventForReplay, utf8ByteLength } from "./prepare-event-for-replay.js";
+import { clipSkippedSeqRanges, computeLogicalSeqBounds, isCoverageContiguous, normalizeSkippedSeqRanges, projectReplayEvents, retainSkippedSeqRangesForEventSuffix } from "./replay-projection.js";
 import type { DashboardEvent } from "./types.js";
+
 
 /** Default wire/IDB tail budget (~1.5 MiB). */
 export const DEFAULT_TAIL_WINDOW_BYTES = 1.5 * 1024 * 1024;
@@ -17,11 +20,13 @@ export interface SeqEvent<T = DashboardEvent> {
 export type EventWindowPreparationOptions = Pick<
   PrepareEventForReplayOptions,
   "registerInlineAsset" | "maxEventBytes" | "maxToolPayloadBytes"
->;
+> & { skippedSeqRanges?: readonly SkippedSeqRange[] };
 
 export interface EventWindowResult<T> {
   /** Selected events in ascending seq order. */
   events: SeqEvent<T>[];
+  /** Skipped sequence ranges within the window coverage. */
+  skippedSeqRanges?: SkippedSeqRange[];
   /** True when the input had older events not included. */
   hasMoreOlder: boolean;
   /** True when the first selected event is not a complete user-turn boundary. */
@@ -101,6 +106,27 @@ function snapshotContiguousAscending(events: unknown): SeqEvent<DashboardEvent>[
   }
 }
 
+function snapshotSparseAscending(events: unknown): SeqEvent<DashboardEvent>[] | null {
+  if (!Array.isArray(events)) return null;
+  const snapshot: SeqEvent<DashboardEvent>[] = [];
+  let previousSeq: number | undefined;
+  try {
+    for (const entry of events) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
+      const record = entry as unknown as Record<string, unknown>;
+      const seq = record.seq;
+      const event = record.event;
+      if (typeof seq !== "number" || !Number.isSafeInteger(seq) || !isDashboardEvent(event)) return null;
+      if (previousSeq !== undefined && seq <= previousSeq) return null;
+      snapshot.push({ seq, event });
+      previousSeq = seq;
+    }
+    return snapshot;
+  } catch {
+    return null;
+  }
+}
+
 function eventEnvelopeOverhead(seq: number): number {
   const envelopeWithNull = utf8ByteLength(JSON.stringify({ seq, event: null }));
   return envelopeWithNull - utf8ByteLength("null");
@@ -126,7 +152,8 @@ function prepareSingleEntry(
   options: EventWindowPreparationOptions,
 ): { prepared: SeqEvent<DashboardEvent>; truncated: boolean } {
   const maxEventBytes = Math.max(1, perEventCap - eventEnvelopeOverhead(entry.seq));
-  const prepared = prepareEventForReplay(entry.event, {
+  const clonedEvent = entry.event ? structuredClone(entry.event) : entry.event;
+  const prepared = prepareEventForReplay(clonedEvent, {
     maxEventBytes,
     maxTextBytes: maxEventBytes,
     registerInlineAsset: options.registerInlineAsset,
@@ -191,13 +218,16 @@ function resultFromSelection<T>(
   selected: SeqEvent<T>[],
   bytes: number,
   partialHead: boolean,
+  hasMoreOlderOverride?: boolean,
+  windowMinSeqOverride?: number | null,
+  windowMaxSeqOverride?: number | null,
 ): EventWindowResult<T> {
   return {
     events: selected,
-    hasMoreOlder: selected.length < sourceLength,
+    hasMoreOlder: hasMoreOlderOverride ?? (selected.length < sourceLength),
     partialHead,
-    windowMinSeq: selected[0]?.seq ?? null,
-    windowMaxSeq: selected.at(-1)?.seq ?? null,
+    windowMinSeq: windowMinSeqOverride !== undefined ? windowMinSeqOverride : (selected[0]?.seq ?? null),
+    windowMaxSeq: windowMaxSeqOverride !== undefined ? windowMaxSeqOverride : (selected.at(-1)?.seq ?? null),
     bytes,
   };
 }
@@ -232,7 +262,7 @@ function compactPreparedSelection(
     remaining -= estimateSeqEventBytes(compactedEntry);
   }
 
-  let bytes = compacted.reduce((total, entry) => total + estimateSeqEventBytes(entry), 0);
+  const bytes = compacted.reduce((total, entry) => total + estimateSeqEventBytes(entry), 0);
   if (bytes > budget) {
     const minimal = compacted.map((entry) => ({
       seq: entry.seq,
@@ -253,33 +283,25 @@ function finalizeSelectedEntries(
   partialHead: boolean,
   budget: number,
   options: EventWindowPreparationOptions,
+  hasMoreOlderOverride?: boolean,
+  windowMinSeqOverride?: number | null,
+  windowMaxSeqOverride?: number | null,
 ): EventWindowResult<DashboardEvent> {
   if (!options.registerInlineAsset) {
-    return resultFromSelection(source.length, selected, bytes, partialHead);
+    return resultFromSelection(source.length, selected, bytes, partialHead, hasMoreOlderOverride, windowMinSeqOverride, windowMaxSeqOverride);
   }
-
   const sourceBySeq = new Map(source.map((entry) => [entry.seq, entry]));
-  const selectedSource = selected.map((entry) => sourceBySeq.get(entry.seq)!);
-  const prepared = prepareEntries(selectedSource, budget, options);
-  const preparedBytes = prepared.events.reduce((total, entry) => total + estimateSeqEventBytes(entry), 0);
-  if (preparedBytes <= budget) {
-    return resultFromSelection(
-      source.length,
-      prepared.events,
-      preparedBytes,
-      partialHead || selectionContainsTruncation(prepared.events, prepared.truncatedSeqs),
-    );
-  }
-
-  // Registration is deliberately the final selection-independent step: once an
-  // asset is registered, keep its event in the delivery set and compact payload
-  // strings instead of shrinking the set and orphaning the registration.
+  const selectedRawSource = selected.map((entry) => sourceBySeq.get(entry.seq) || entry);
+  const prepared = prepareEntries(selectedRawSource, budget, options);
   const compacted = compactPreparedSelection(prepared.events, budget);
   return resultFromSelection(
     source.length,
     compacted.events,
     compacted.bytes,
     partialHead || compacted.truncated || selectionContainsTruncation(compacted.events, prepared.truncatedSeqs),
+    hasMoreOlderOverride,
+    windowMinSeqOverride,
+    windowMaxSeqOverride,
   );
 }
 
@@ -296,48 +318,136 @@ export function selectNewestEventsByBudget(
   const budget = Number.isFinite(budgetBytes) && budgetBytes > 0
     ? Math.floor(budgetBytes)
     : DEFAULT_TAIL_WINDOW_BYTES;
-  const source = snapshotContiguousAscending(eventsAsc);
-  if (source === null) return malformedWindow();
-  if (source.length === 0) return emptyWindow();
+
+  const userRanges = options.skippedSeqRanges ?? (options as any).ranges;
+  let rawSource: SeqEvent<DashboardEvent>[] | null;
+
+  if (!userRanges || userRanges.length === 0) {
+    rawSource = snapshotContiguousAscending(eventsAsc);
+    if (rawSource === null) return malformedWindow();
+  } else {
+    rawSource = snapshotSparseAscending(eventsAsc);
+    if (rawSource === null) return malformedWindow();
+    if (rawSource.length > 0) {
+      const minSeq = rawSource[0]!.seq;
+      const maxSeq = rawSource.at(-1)!.seq;
+      if (!isCoverageContiguous(rawSource, userRanges, minSeq, maxSeq)) {
+        return malformedWindow();
+      }
+    }
+  }
+
+  if (rawSource.length === 0) return emptyWindow();
+
+  const projection = projectReplayEvents(rawSource);
+  const source = projection.events;
+  const allSkippedRanges = normalizeSkippedSeqRanges([...(userRanges ?? []), ...projection.skippedSeqRanges]);
+
+  if (source.length === 0) {
+    return emptyWindow();
+  }
 
   const perEventCap = computePerEventCap(budget, options.maxEventBytes);
 
-  // Window BEFORE preparing: prepare only the newest bounded suffix, walking
-  // from the tail until adding one more prepared event would exceed the budget.
-  // This is exactly the bounded contiguous suffix a full-source prepare +
-  // `selectBoundedSuffix` would yield, but preparation is O(window), not
-  // O(source). The whole selection (including turn extension) always fits the
-  // budget, so every event it can pick lives inside this suffix.
-  const truncatedSeqs = new Set<number>();
-  const suffixDescending: SeqEvent<DashboardEvent>[] = [];
-  let suffixStart = source.length;
-  let suffixBytes = 0;
-  for (let index = source.length - 1; index >= 0; index -= 1) {
-    const { prepared, truncated } = prepareSingleEntry(source[index]!, perEventCap, { maxToolPayloadBytes: options.maxToolPayloadBytes });
-    const size = estimateSeqEventBytes(prepared);
-    if (suffixBytes + size > budget) break;
-    if (truncated) truncatedSeqs.add(prepared.seq);
-    suffixStart = index;
-    suffixBytes += size;
-    suffixDescending.push(prepared);
+  let newestUserIdx = -1;
+  for (let i = source.length - 1; i >= 0; i -= 1) {
+    if (isUserTurnStart(source[i]!)) {
+      newestUserIdx = i;
+      break;
+    }
   }
-  const suffix = suffixDescending.slice().reverse();
 
-  // Return the complete bounded suffix. User-turn alignment must not discard
-  // older tool events that already fit the byte budget, especially for paging.
-  // Mark a partial head only when the bounded suffix begins inside a turn.
-  // A suffix beginning at a user message is already turn-aligned, even when
-  // older complete turns exist below it.
-  const partialHead = truncatedSeqs.has(suffix[0]!.seq)
-    || (!isUserTurnStart(suffix[0]!) && hasPreparedTurnStartBelow(source, suffixStart, perEventCap, options));
-  return finalizeSelectedEntries(
-    source,
+  const scanOptions: EventWindowPreparationOptions = {
+    maxEventBytes: options.maxEventBytes,
+    maxToolPayloadBytes: options.maxToolPayloadBytes,
+    registerInlineAsset: undefined,
+  };
+
+  const toolCapCandidates = options.maxToolPayloadBytes !== undefined
+    ? [options.maxToolPayloadBytes, 10 * 1024, 4 * 1024, 2 * 1024, 1 * 1024]
+    : [undefined];
+
+  let chosenSuffix: SeqEvent<DashboardEvent>[] = [];
+  let chosenTruncatedSeqs = new Set<number>();
+  let chosenSuffixStart = source.length;
+  let chosenSuffixEventBytes = 0;
+
+  for (const toolCap of toolCapCandidates) {
+    const truncatedSeqs = new Set<number>();
+    const currentSuffixDescending: SeqEvent<DashboardEvent>[] = [];
+    let currentBytes = 0;
+    let validSuffixDescending: SeqEvent<DashboardEvent>[] = [];
+    let validSuffixStart = source.length;
+    let validSuffixBytes = 0;
+
+    for (let index = source.length - 1; index >= 0; index -= 1) {
+      const { prepared, truncated } = prepareSingleEntry(source[index]!, perEventCap, {
+        ...scanOptions,
+        maxToolPayloadBytes: toolCap,
+      });
+      const size = estimateSeqEventBytes(prepared);
+
+      if (currentBytes + size > budget) break;
+
+      if (truncated) truncatedSeqs.add(prepared.seq);
+      currentBytes += size;
+      currentSuffixDescending.push(truncated ? prepared : source[index]!);
+
+      const isTurnBoundary = isUserTurnStart(source[index]!) || index === 0;
+      if (newestUserIdx === -1 || isTurnBoundary || index >= newestUserIdx) {
+        validSuffixDescending = [...currentSuffixDescending];
+        validSuffixStart = index;
+        validSuffixBytes = currentBytes;
+      }
+    }
+
+    chosenSuffix = validSuffixDescending.reverse();
+    chosenTruncatedSeqs = truncatedSeqs;
+    chosenSuffixStart = validSuffixStart;
+    chosenSuffixEventBytes = validSuffixBytes;
+
+    if (newestUserIdx === -1 || chosenSuffixStart <= newestUserIdx) {
+      break;
+    }
+  }
+
+  const suffix = chosenSuffix;
+  const suffixStart = chosenSuffixStart;
+
+  let windowSkippedRanges = retainSkippedSeqRangesForEventSuffix(suffix, allSkippedRanges);
+  let totalSkippedMetaBytes = windowSkippedRanges.length > 0 ? utf8ByteLength(JSON.stringify(windowSkippedRanges)) : 0;
+  let totalBytes = chosenSuffixEventBytes + totalSkippedMetaBytes;
+
+  while (suffix.length > 0 && totalBytes > budget) {
+    const dropped = suffix.shift()!;
+    chosenSuffixStart += 1;
+    chosenSuffixEventBytes -= estimateSeqEventBytes(dropped);
+    windowSkippedRanges = retainSkippedSeqRangesForEventSuffix(suffix, allSkippedRanges);
+    totalSkippedMetaBytes = windowSkippedRanges.length > 0 ? utf8ByteLength(JSON.stringify(windowSkippedRanges)) : 0;
+    totalBytes = chosenSuffixEventBytes + totalSkippedMetaBytes;
+  }
+
+  const { minSeq: logicalMinSeq, maxSeq: logicalMaxSeq } = computeLogicalSeqBounds(suffix, windowSkippedRanges);
+
+  const hasMoreOlderCalc = chosenSuffixStart > 0 || Boolean(logicalMinSeq !== null && allSkippedRanges.some((r) => r.fromSeq < logicalMinSeq));
+  const partialHeadCalc = chosenTruncatedSeqs.has(suffix[0]?.seq ?? -1)
+    || (suffix.length > 0 && !isUserTurnStart(suffix[0]!) && hasPreparedTurnStartBelow(source, chosenSuffixStart, perEventCap, scanOptions));
+
+  const finalResult = finalizeSelectedEntries(
+    rawSource,
     suffix,
-    suffixBytes,
-    partialHead,
+    totalBytes,
+    partialHeadCalc,
     budget,
     options,
+    hasMoreOlderCalc,
+    logicalMinSeq,
+    logicalMaxSeq,
   );
+  return {
+    ...finalResult,
+    skippedSeqRanges: windowSkippedRanges.length > 0 ? windowSkippedRanges : undefined,
+  };
 }
 
 /** Select the newest semantic page strictly below the exclusive `fromSeq`. */

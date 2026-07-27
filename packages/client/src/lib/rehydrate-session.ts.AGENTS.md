@@ -1,3 +1,3 @@
 # rehydrate-session.ts — index
 
-rehydrateSession(sessionId,cache). Cache hit → re-reduce raw payload via reduceEvent into provisional SessionState; returns {lastSeq:maxSeq,state,events}. Miss → null. Per-entry re-reduce fault-isolated: any throw discards the poisoned cache entry and returns a miss so the caller degrades to full replay (no app crash). See change: reduce-session-replay-traffic. See change: fix-reducer-crash-undefined-toolname.
+`rehydrateSession(sessionId,cache)` validates exact events plus skipped ranges, re-reduces exact events into provisional state, and returns logical min/max coverage. Any malformed coverage or reducer fault discards cache and returns miss. See changes: reduce-session-replay-traffic, fix-reducer-crash-undefined-toolname, tool-burst-hydration.

@@ -49,4 +49,22 @@ describe("boundEventBytes near-boundary shrink (event_window / prepare-event-for
     // The event must actually fit the requested budget.
     expect(utf8ByteLength(JSON.stringify(out.event))).toBeLessThanOrEqual(maxEventBytes);
   });
+
+  it("does not constrain ordinary message/system event payloads by maxToolPayloadBytes 20KiB limit", () => {
+    const text = "A".repeat(50 * 1024);
+    const event: DashboardEvent = {
+      eventType: "message_update",
+      timestamp: 0,
+      data: { message: { role: "assistant", content: [{ type: "text", text }] } },
+    };
+    const prepared = prepareEventForReplay(event, {
+      maxToolPayloadBytes: 20 * 1024,
+      maxEventBytes: 256 * 1024,
+    });
+
+    expect(prepared.event.data).not.toHaveProperty("replayUnavailable");
+    const dataBytes = utf8ByteLength(JSON.stringify(prepared.event.data));
+    expect(dataBytes).toBeGreaterThan(20 * 1024);
+    expect(prepared.issues.some((i) => i.code === "event_truncated" && i.detail === "tool_payload_limit")).toBe(false);
+  });
 });

@@ -2,6 +2,7 @@ import {
   DEFAULT_MAX_REPLAY_TEXT_BYTES,
   REPLAY_BYTE_TRUNCATION_MARKER,
 } from "@blackbelt-technology/pi-dashboard-shared/prepare-event-for-replay.js";
+import { isCoverageContiguous } from "@blackbelt-technology/pi-dashboard-shared/replay-projection.js";
 import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { IDBFactory } from "fake-indexeddb";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -285,5 +286,234 @@ describe("replay-cache — scoped + generation fence", () => {
     const stored = (hit!.payload[0]!.event.data as { result: string }).result;
     expect(stored.length).toBeLessThan(huge.length);
     expect(stored).toContain(REPLAY_BYTE_TRUNCATION_MARKER);
+  });
+  it("stores projected exact events 1 and 101 with skipped range 2..100 and retains non-empty payload and logical bounds/range", async () => {
+    const cache = createReplayCache({ factory });
+    const scope = { serverEpoch: "server-8", sourceGeneration: "source-b" };
+
+    await cache.putScoped(scope, "s-skipped", {
+      maxSeq: 101,
+      payload: [evt(1), evt(101)],
+      skippedSeqRanges: [{ fromSeq: 2, toSeq: 100 }],
+    });
+
+    const hit = await cache.getScoped(scope, "s-skipped");
+    expect(hit).not.toBeNull();
+    expect(hit!.payload).toHaveLength(2);
+    expect(hit!.payload.map((e) => e.seq)).toEqual([1, 101]);
+    expect(hit!.minSeq).toBe(1);
+    expect(hit!.maxSeq).toBe(101);
+    expect(hit!.skippedSeqRanges).toEqual([{ fromSeq: 2, toSeq: 100 }]);
+  });
+
+  it("round-trips schema-v4 cache entry with skippedSeqRanges and scope metadata", async () => {
+    expect(REPLAY_CACHE_SCHEMA_VERSION).toBe(4);
+
+    const cache = createReplayCache({ factory });
+    const scope = { serverEpoch: "server-v4", sourceGeneration: "gen-v4" };
+
+    const putData = {
+      maxSeq: 25,
+      payload: [evt(1), evt(25)],
+      skippedSeqRanges: [{ fromSeq: 2, toSeq: 24 }],
+    };
+
+    await cache.putScoped(scope, "s-v4", putData);
+
+    const hit = await cache.getScoped(scope, "s-v4");
+    expect(hit).not.toBeNull();
+    expect(hit!.schemaVersion).toBe(4);
+    expect(hit!.serverEpoch).toBe("server-v4");
+    expect(hit!.sourceGeneration).toBe("gen-v4");
+    expect(hit!.minSeq).toBe(1);
+    expect(hit!.maxSeq).toBe(25);
+    expect(hit!.skippedSeqRanges).toEqual([{ fromSeq: 2, toSeq: 24 }]);
+    expect(hit!.payload.map((e) => e.seq)).toEqual([1, 25]);
+  });
+  it("retains only range metadata owned by surviving exact suffix under byte cap and recomputes logical minSeq and range bounds", async () => {
+    // Projected exacts 1, 101, 201 with gap ranges 2..100 and 102..200.
+    // Under a byte cap that fits exact 201 + range 102..200 metadata but drops exact 1 and 101,
+    // only the range leading into exact 201 (102..200) is retained.
+    const evt1 = evt(1);
+    const evt101 = evt(101);
+    const evt201 = evt(201);
+    const range1 = { fromSeq: 2, toSeq: 100 };
+    const range2 = { fromSeq: 102, toSeq: 200 };
+
+    const evt201Bytes = new TextEncoder().encode(JSON.stringify(evt201)).byteLength;
+    const range2Bytes = new TextEncoder().encode(JSON.stringify(range2)).byteLength;
+    // Calculate cap honestly: fits exact 201 + range 102..200 metadata + envelope overhead,
+    // but strictly less than exact 101 + exact 201 payload.
+    const exact201WithRangeCap = evt201Bytes + range2Bytes + 25;
+
+    const cache = createReplayCache({ factory, maxBytesPerSession: exact201WithRangeCap });
+    const scope = { serverEpoch: "server-7", sourceGeneration: "source-a" };
+
+    await cache.putScoped(scope, "s1", {
+      maxSeq: 201,
+      payload: [evt1, evt101, evt201],
+      skippedSeqRanges: [range1, range2],
+      skippedRanges: [{ startSeq: 2, endSeq: 100 }, { startSeq: 102, endSeq: 200 }],
+      ranges: [{ minSeq: 2, maxSeq: 100 }, { minSeq: 102, maxSeq: 200 }],
+    } as any);
+
+    const hit = await cache.getScoped(scope, "s1");
+
+    expect(hit).not.toBeNull();
+    expect(hit!.payload.map((e) => e.seq)).toEqual([201]);
+
+    const hitRanges = hit!.skippedSeqRanges ?? (hit as any)?.skippedRanges ?? (hit as any)?.ranges;
+    expect(hitRanges).toBeDefined();
+    expect(hitRanges).toHaveLength(1);
+
+    const rangeStart = hitRanges[0].fromSeq ?? hitRanges[0].startSeq ?? hitRanges[0].minSeq;
+    const rangeEnd = hitRanges[0].toSeq ?? hitRanges[0].endSeq ?? hitRanges[0].maxSeq;
+
+    expect(rangeStart).toBe(102);
+    expect(rangeEnd).toBe(200);
+
+    expect(hit!.minSeq).toBe(102);
+    expect(hit!.maxSeq).toBe(201);
+
+    // Contiguous rehydrate coverage: leading skipped range ends at 200, next event in payload is seq 201.
+    expect(rangeEnd + 1).toBe(hit!.payload[0]!.seq);
+
+    // Total persisted payload + range metadata JSON fits byte cap.
+    const totalBytes = hit!.bytes ?? new TextEncoder().encode(JSON.stringify(hit)).byteLength;
+    expect(totalBytes).toBeLessThanOrEqual(exact201WithRangeCap);
+  });
+  it("enforces 20KiB tool payload cap on merged tool start/update/end events and retains representative event and skipped ranges", async () => {
+    const cache = createReplayCache({ factory });
+    const scope = { serverEpoch: "server-tool-cap", sourceGeneration: "source-tool-cap" };
+
+    // 3 tool events for one tool call, each individually store-safe (~8 KiB < 20 KiB),
+    // but merged args + details + result (~24 KiB) exceed 20 KiB.
+    const startEvt: CachedEvent = {
+      seq: 1,
+      event: {
+        sessionId: "s-tool-cap",
+        eventType: "tool_execution_start",
+        timestamp: 100,
+        data: {
+          toolCallId: "tc-heavy-123",
+          toolName: "bash",
+          args: { command: "a".repeat(8000) },
+        },
+      } as unknown as DashboardEvent,
+    };
+
+    const updateEvt: CachedEvent = {
+      seq: 2,
+      event: {
+        sessionId: "s-tool-cap",
+        eventType: "tool_execution_update",
+        timestamp: 101,
+        data: {
+          toolCallId: "tc-heavy-123",
+          toolName: "bash",
+          details: { output: "b".repeat(8000) },
+        },
+      } as unknown as DashboardEvent,
+    };
+
+    const endEvt: CachedEvent = {
+      seq: 3,
+      event: {
+        sessionId: "s-tool-cap",
+        eventType: "tool_execution_end",
+        timestamp: 102,
+        data: {
+          toolCallId: "tc-heavy-123",
+          toolName: "bash",
+          status: "completed",
+          result: "c".repeat(8000),
+        },
+      } as unknown as DashboardEvent,
+    };
+
+    await cache.putScoped(scope, "s-tool-cap", {
+      maxSeq: 3,
+      payload: [startEvt, updateEvt, endEvt],
+    });
+
+    const hit = await cache.getScoped(scope, "s-tool-cap");
+    expect(hit).not.toBeNull();
+
+    // The merged payload must be bounded so event.data serialized UTF-8 <= 20*1024
+    for (const cached of hit!.payload) {
+      const dataBytes = new TextEncoder().encode(JSON.stringify(cached.event.data)).byteLength;
+      expect(dataBytes).toBeLessThanOrEqual(20 * 1024);
+    }
+
+    // Must retain representative event with useful identity/display/terminal metadata
+    const representative = hit!.payload[hit!.payload.length - 1]!;
+    const data = representative.event.data as Record<string, unknown>;
+    expect(data.toolCallId).toBe("tc-heavy-123");
+    expect(data.toolName).toBe("bash");
+    expect(data.status).toBe("completed");
+    expect(data).toHaveProperty("result");
+
+    // Must record skippedSeqRanges when intermediate events are skipped/coalesced
+    if (hit!.payload.length < 3) {
+      expect(hit!.skippedSeqRanges).toBeDefined();
+      expect(hit!.skippedSeqRanges!.length).toBeGreaterThan(0);
+    }
+  });
+  it("combines projected tool burst skippedSeqRanges with putScoped value payload and asserts contiguous logical coverage", async () => {
+    const cache = createReplayCache({ factory });
+    const scope = { serverEpoch: "server-tool-burst", sourceGeneration: "gen-burst" };
+
+    const userEvt: CachedEvent = {
+      seq: 1,
+      event: {
+        sessionId: "s-burst",
+        eventType: "user_message",
+        timestamp: 100,
+        data: { text: "hello" },
+      } as unknown as DashboardEvent,
+    };
+
+    const toolStart: CachedEvent = {
+      seq: 2,
+      event: {
+        sessionId: "s-burst",
+        eventType: "tool_execution_start",
+        timestamp: 101,
+        data: { toolCallId: "tc-1", toolName: "read" },
+      } as unknown as DashboardEvent,
+    };
+
+    const toolUpdate: CachedEvent = {
+      seq: 3,
+      event: {
+        sessionId: "s-burst",
+        eventType: "tool_execution_update",
+        timestamp: 102,
+        data: { toolCallId: "tc-1", toolName: "read", details: { text: "partial" } },
+      } as unknown as DashboardEvent,
+    };
+
+    const toolEnd: CachedEvent = {
+      seq: 4,
+      event: {
+        sessionId: "s-burst",
+        eventType: "tool_execution_end",
+        timestamp: 103,
+        data: { toolCallId: "tc-1", toolName: "read", status: "completed", result: "ok" },
+      } as unknown as DashboardEvent,
+    };
+
+    await cache.putScoped(scope, "s-burst", {
+      maxSeq: 4,
+      payload: [userEvt, toolStart, toolUpdate, toolEnd],
+    });
+
+    const hit = await cache.getScoped(scope, "s-burst");
+    expect(hit).not.toBeNull();
+    expect(hit!.payload.map((e) => e.seq)).toEqual([1, 4]);
+    expect(hit!.skippedSeqRanges).toEqual([{ fromSeq: 2, toSeq: 3 }]);
+    expect(hit!.minSeq).toBe(1);
+    expect(hit!.maxSeq).toBe(4);
+    expect(isCoverageContiguous(hit!.payload, hit!.skippedSeqRanges ?? [], hit!.minSeq!, hit!.maxSeq!)).toBe(true);
   });
 });
