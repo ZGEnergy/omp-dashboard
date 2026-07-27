@@ -113,11 +113,6 @@ export interface EventMessage {
   event: DashboardEvent;
 }
 
-export interface SkippedSeqRange {
-  fromSeq: number;
-  toSeq: number;
-}
-
 export type ReplayKind = "cold" | "delta" | "older";
 export type ReplayErrorCode = "unavailable" | "malformed_source" | "delivery_failed";
 
@@ -128,7 +123,6 @@ export interface EventReplayMessage {
   sourceGeneration: string;
   replayKind: ReplayKind;
   events: Array<{ seq: number; event: DashboardEvent }>;
-  skippedSeqRanges?: SkippedSeqRange[];
   isLast: boolean;
   windowMinSeq: number | null;
   windowMaxSeq: number | null;

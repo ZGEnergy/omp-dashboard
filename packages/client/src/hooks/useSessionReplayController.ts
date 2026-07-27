@@ -4,7 +4,6 @@ import type {
   EventMessage,
   EventReplayMessage,
   SessionStateResetMessage,
-  SkippedSeqRange,
 } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
 import {
   type LedgerEvent,
@@ -32,13 +31,6 @@ export interface ReplayControllerEffects {
   send(message: SessionSubscribeMessage): void;
   /** Reducer/persister/plugin effects are called only after ledger admission. */
   apply(sessionId: string, events: readonly LedgerEvent[]): void;
-  /** Optional persistence effect for admitted frames (live, cold, delta, older rebuild). */
-  persist?(
-    sessionId: string,
-    events: readonly LedgerEvent[],
-    skippedRanges: readonly SkippedSeqRange[],
-    mode: "append" | "replace",
-  ): void;
   /** Authoritative server window metadata for every admitted replay frame. */
   window?(sessionId: string, metadata: ReplayWindowMetadata): void;
   /** The ledger dropped its head to keep the hot transcript within budget. */
@@ -159,14 +151,9 @@ export class SessionReplayController {
   }
 
   /** Cache must contain a primary conversation turn before it can supersede canonical cold replay. */
-  seedCached(
-    sessionId: string,
-    sourceGeneration: string,
-    events: readonly LedgerEvent[],
-    skippedRanges: readonly SkippedSeqRange[] = [],
-  ): boolean {
-    if (events.length > 0 && !hasUserTurnStart(events)) return false;
-    return this.ledger(sessionId).seed(sourceGeneration, events, skippedRanges);
+  seedCached(sessionId: string, sourceGeneration: string, events: readonly LedgerEvent[]): boolean {
+    if (!hasUserTurnStart(events)) return false;
+    return this.ledger(sessionId).seed(sourceGeneration, events);
   }
 
   begin(sessionId: string, kind: ReplayRequest["kind"], sourceGeneration = "", anchorToken?: string, reason: ReplayReason = "initial_navigation"): SessionSubscribeMessage {
@@ -250,10 +237,7 @@ export class SessionReplayController {
       this.begin(message.sessionId, "cold", ledger.sourceGeneration ?? "", undefined, "conflict");
       return true;
     }
-    if (result.accepted.length) {
-      this.publishAdmitted(message.sessionId, result);
-      this.effects.persist?.(message.sessionId, result.accepted, [], "append");
-    }
+    if (result.accepted.length) this.publishAdmitted(message.sessionId, result);
     if (result.repair) this.begin(message.sessionId, "delta", ledger.sourceGeneration!, undefined, "live_gap");
     return true;
   }
@@ -289,13 +273,7 @@ export class SessionReplayController {
       partialHead: typeof message.partialHead === "boolean" ? message.partialHead : null,
       kind: message.replayKind,
     });
-    if (message.replayKind !== "older") {
-      const skipped = message.skippedSeqRanges ?? [];
-      if (result.accepted.length || skipped.length) {
-        this.effects.persist?.(message.sessionId, result.accepted, skipped, "append");
-      }
-      if (result.accepted.length) this.publishAdmitted(message.sessionId, result);
-    }
+    if (message.replayKind !== "older" && result.accepted.length) this.publishAdmitted(message.sessionId, result);
     if (message.isLast) {
       this.clearPending(message.sessionId);
       if (result.rebuild) {
@@ -304,12 +282,6 @@ export class SessionReplayController {
           message.sessionId,
           ledger.events,
           ledger.takeOlderCompletion(),
-        );
-        this.effects.persist?.(
-          message.sessionId,
-          ledger.events,
-          ledger.skippedSeqRanges,
-          "replace",
         );
       }
       const cursor = ledger.minSeq;

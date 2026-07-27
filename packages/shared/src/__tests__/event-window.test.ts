@@ -1,16 +1,16 @@
 import { describe, expect, it } from "vitest";
+import type { DashboardEvent } from "../types.js";
 import {
-  clampTailWindowBytes,
   DEFAULT_TAIL_WINDOW_BYTES,
-  estimateSeqEventBytes,
   MAX_TAIL_WINDOW_BYTES,
   MIN_TAIL_WINDOW_BYTES,
-  type SeqEvent,
+  clampTailWindowBytes,
+  estimateSeqEventBytes,
   selectNewestEventsByBudget,
   selectOlderEventsByBudget,
+  type SeqEvent,
 } from "../event-window.js";
 import { prepareEventForReplay } from "../prepare-event-for-replay.js";
-import type { DashboardEvent } from "../types.js";
 
 function event(eventType: string, data: Record<string, unknown> = {}): DashboardEvent {
   return { eventType, timestamp: 1, data };
@@ -193,20 +193,6 @@ describe("selectNewestEventsByBudget", () => {
       bytes: 0,
       sourceMalformed: true,
     });
-  });
-  it("retains leading skipped range on projected exact rep101 and reports logical windowMinSeq 26", () => {
-    const sparseSource: SeqEvent<DashboardEvent>[] = [{
-      seq: 101,
-      event: event("tool_execution_end", { toolCallId: "call_101", toolName: "bash", result: { output: "ok" } }),
-    }];
-    const skippedSeqRanges = [{ fromSeq: 26, toSeq: 100 }];
-
-    const r = selectNewestEventsByBudget(sparseSource, 1_000_000, { skippedSeqRanges });
-
-    expect(r.events).toEqual(sparseSource);
-    expect(r.skippedSeqRanges).toEqual(skippedSeqRanges);
-    expect(r.windowMinSeq).toBe(26);
-    expect(r.windowMaxSeq).toBe(101);
   });
 });
 

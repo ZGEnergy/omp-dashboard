@@ -1,8 +1,8 @@
-import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import { describe, it, expect, beforeEach } from "vitest";
 import { IDBFactory } from "fake-indexeddb";
-import { beforeEach, describe, expect, it } from "vitest";
+import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import { createReplayCache, type CachedEvent, type ReplayCache, type ReplayCacheScope } from "../replay-cache.js";
 import { rehydrateSession } from "../rehydrate-session.js";
-import { type CachedEvent, createReplayCache, type ReplayCache, type ReplayCacheScope } from "../replay-cache.js";
 
 const scope: ReplayCacheScope = { serverEpoch: "server-a", sourceGeneration: "source-a" };
 
@@ -85,23 +85,6 @@ describe("rehydrateSession", () => {
     expect(result?.events.map((e) => e.seq)).toEqual([5, 6]);
     // Re-reduced state carries the cached user messages (not an empty chat).
     expect(result?.state.messages.length).toBeGreaterThan(0);
-  });
-
-  it("rehydrates session with skippedSeqRanges and logical minSeq/lastSeq", async () => {
-    const cache = createReplayCache({ factory });
-    await cache.putScoped(scope, "s-ranges", {
-      maxSeq: 50,
-      minSeq: 1,
-      payload: [userMsg(49, "hello"), userMsg(50, "world")],
-      skippedSeqRanges: [{ fromSeq: 1, toSeq: 48 }],
-    });
-
-    const result = await rehydrateSession("s-ranges", cache, authority());
-    expect(result).not.toBeNull();
-    expect(result?.lastSeq).toBe(50);
-    expect(result?.minSeq).toBe(1);
-    expect(result?.events.map((e) => e.seq)).toEqual([49, 50]);
-    expect(result?.skippedSeqRanges).toEqual([{ fromSeq: 1, toSeq: 48 }]);
   });
 
   it("returns null when the session has no cache entry", async () => {

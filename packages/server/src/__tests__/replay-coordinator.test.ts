@@ -109,16 +109,10 @@ describe("replay coordinator", () => {
     await coordinator.subscribe({ type: "subscribe", sessionId: "s", requestId: "r", mode: "tail", windowBytes: 1024 * 1024 }, ctx);
     const replays = ws.frames.filter((frame: any) => frame.type === "event_replay");
     const deliveredSeqs = replays.flatMap((frame: any) => frame.events.map((entry: any) => entry.seq));
-    const skippedRanges = replays.flatMap((frame: any) => (frame.skippedSeqRanges ?? []) as Array<{ fromSeq: number; toSeq: number }>);
-    const coverage = [
-      ...deliveredSeqs.map((seq: number) => ({ fromSeq: seq, toSeq: seq })),
-      ...skippedRanges,
-    ].sort((a: any, b: any) => a.fromSeq - b.fromSeq);
-    expect(coverage[0]?.fromSeq).toBe(1);
-    expect(coverage.at(-1)?.toSeq).toBe(82);
-    for (let index = 1; index < coverage.length; index += 1) {
-      expect(coverage[index]?.fromSeq).toBe(coverage[index - 1]!.toSeq + 1);
-    }
+    // The ~400 KiB of tail history fits the 1 MiB window budget: both turns
+    // must hydrate, chunked across frames, instead of the newest 254 KiB turn.
+    expect(deliveredSeqs).toEqual(Array.from({ length: 82 }, (_, index) => index + 1));
+    expect(replays.filter((frame: any) => frame.events.length > 0).length).toBeGreaterThan(1);
     const terminal = replays.find((frame: any) => frame.isLast);
     expect(terminal).toMatchObject({ windowMinSeq: 1, windowMaxSeq: 82, hasMoreOlder: false });
   });
@@ -138,18 +132,9 @@ describe("replay coordinator", () => {
 
     await coordinator.subscribe({ type: "subscribe", sessionId: "s", requestId: "r", mode: "tail", windowBytes: 1024 * 1024 }, ctx);
 
-    const replays = ws.frames.filter((frame: any) => frame.type === "event_replay");
-    const delivered = replays.flatMap((frame: any) => frame.events);
-    const skippedRanges = replays.flatMap((frame: any) => (frame.skippedSeqRanges ?? []) as Array<{ fromSeq: number; toSeq: number }>);
-    const coverage = [
-      ...delivered.map((entry: any) => ({ fromSeq: entry.seq, toSeq: entry.seq })),
-      ...skippedRanges,
-    ].sort((a: any, b: any) => a.fromSeq - b.fromSeq);
-    expect(coverage[0]?.fromSeq).toBe(1);
-    expect(coverage.at(-1)?.toSeq).toBe(302);
-    for (let index = 1; index < coverage.length; index += 1) {
-      expect(coverage[index]?.fromSeq).toBe(coverage[index - 1]!.toSeq + 1);
-    }
+    const delivered = ws.frames.filter((frame: any) => frame.type === "event_replay").flatMap((frame: any) => frame.events);
+    expect(delivered.map((entry: any) => entry.seq)).toEqual(Array.from({ length: 302 }, (_, index) => index + 1));
+    expect(delivered[0]?.event).toMatchObject({ eventType: "message_start", data: { message: { content: "keep this turn" } } });
     expect(delivered.at(-1)?.event).toMatchObject({ eventType: "message_end", data: { message: { content: [{ text: "final answer" }] } } });
   });
 
@@ -175,15 +160,9 @@ describe("replay coordinator", () => {
 
     await coordinator.subscribe({ type: "subscribe", sessionId: "s", requestId: "r", mode: "tail", windowBytes: 1024 * 1024 }, ctx);
 
-    const replays = ws.frames.filter((frame: any) => frame.type === "event_replay");
-    const delivered = replays.flatMap((frame: any) => frame.events);
-    const skippedRanges = replays.flatMap((frame: any) => (frame.skippedSeqRanges ?? []) as Array<{ fromSeq: number; toSeq: number }>);
-    const coverage = [
-      ...delivered.map((entry: any) => ({ fromSeq: entry.seq, toSeq: entry.seq })),
-      ...skippedRanges,
-    ].sort((a: any, b: any) => a.fromSeq - b.fromSeq);
-    expect(coverage[0]?.fromSeq).toBe(1);
-    expect(coverage.at(-1)?.toSeq).toBe(402);
+    const delivered = ws.frames.filter((frame: any) => frame.type === "event_replay").flatMap((frame: any) => frame.events);
+    expect(delivered[0]?.seq).toBe(1);
+    expect(delivered.filter((entry: any) => entry.event.eventType === "message_end").slice(0, -1).every((entry: any) => Object.keys(entry.event.data).length === 0)).toBe(true);
     expect(delivered.at(-1)?.event).toMatchObject({ eventType: "message_end", data: { message: { content: [{ text: "final answer" }] } } });
   });
 
@@ -614,256 +593,6 @@ describe("replay coordinator", () => {
     expect(replaySeqs).not.toContain(1);
     expect(replaySeqs.at(-1)).toBe(101);
     expect(Object.keys(session.assets)).toHaveLength(0);
-  });
-  it("cuts logical older coverage at fromSeq-1 when fromSeq falls inside a tool run", async () => {
-    const store = createMemoryEventStore(() => false);
-    store.insertEvent("s", { eventType: "message_start", timestamp: 1, data: { message: { role: "user", content: "run tool" } } });
-    for (let seq = 2; seq <= 100; seq += 1) {
-      store.insertEvent("s", assistantUpdate(`tool step ${seq}`));
-    }
-    store.insertEvent("s", assistantEnd("done"));
-
-    const ws = socket();
-    const coordinator = createReplayCoordinator({ store });
-    const ctx: any = {
-      ws, sessionManager: { get: () => undefined }, eventStore: store,
-      piGateway: { sendToSession() {} }, sendTo: (_w: any, msg: any) => _w.send(JSON.stringify(msg)),
-      broadcast() {}, getSubscribers: () => [ws], replayPendingUiRequests() {}, markReplaying() {}, clearReplaying() {},
-    };
-
-    await coordinator.subscribe({ type: "subscribe", sessionId: "s", requestId: "r-older", fromSeq: 50, windowBytes: 1024 * 1024 }, ctx);
-
-    const replays = ws.frames.filter((frame: any) => frame.type === "event_replay");
-    const deliveredSeqs = replays.flatMap((frame: any) => frame.events.map((entry: any) => entry.seq));
-    const skippedRanges = replays.flatMap((frame: any) => (frame.skippedSeqRanges ?? []) as Array<{ fromSeq: number; toSeq: number }>);
-
-    expect(deliveredSeqs).toEqual([1, 49]);
-    expect(skippedRanges).toEqual([{ fromSeq: 2, toSeq: 48 }]);
-
-    const terminal = replays.find((frame: any) => frame.isLast);
-    expect(terminal).toMatchObject({
-      windowMinSeq: 1,
-      windowMaxSeq: 49,
-      hasMoreOlder: false,
-    });
-  });
-
-  it("delivers exact contiguous events starting at lastSeq+1 when delta lastSeq lies inside a tool run", async () => {
-    const store = createMemoryEventStore(() => false);
-    store.insertEvent("s", { eventType: "message_start", timestamp: 1, data: { message: { role: "user", content: "run tool" } } });
-    for (let seq = 2; seq <= 100; seq += 1) {
-      store.insertEvent("s", assistantUpdate(`tool step ${seq}`));
-    }
-    store.insertEvent("s", assistantEnd("done"));
-
-    const ws = socket();
-    const coordinator = createReplayCoordinator({ store });
-    const ctx: any = {
-      ws, sessionManager: { get: () => undefined }, eventStore: store,
-      piGateway: { sendToSession() {} }, sendTo: (_w: any, msg: any) => _w.send(JSON.stringify(msg)),
-      broadcast() {}, getSubscribers: () => [ws], replayPendingUiRequests() {}, markReplaying() {}, clearReplaying() {},
-    };
-
-    await coordinator.subscribe({ type: "subscribe", sessionId: "s", requestId: "r-delta", lastSeq: 25, windowBytes: 1024 * 1024 }, ctx);
-
-    const replays = ws.frames.filter((frame: any) => frame.type === "event_replay");
-    const deliveredSeqs = replays.flatMap((frame: any) => frame.events.map((entry: any) => entry.seq));
-    const skippedRanges = replays.flatMap((frame: any) => (frame.skippedSeqRanges ?? []) as Array<{ fromSeq: number; toSeq: number }>);
-
-    expect(deliveredSeqs).toEqual([101]);
-    expect(skippedRanges).toEqual([{ fromSeq: 26, toSeq: 100 }]);
-
-    const terminal = replays.find((frame: any) => frame.isLast);
-    expect(terminal).toMatchObject({
-      windowMinSeq: 26,
-      windowMaxSeq: 101,
-    });
-  });
-
-  it("preserves complete contiguous range, single representative, and pending live ordering across async hydration catch-up", async () => {
-    const store = createMemoryEventStore(() => false);
-    let resolveHydration!: (val: any) => void;
-    const sessionManager: any = { get: () => ({ sessionFile: "/tmp/session.jsonl" }), update() {} };
-    const directoryService: any = {
-      loadSessionEvents: () => new Promise((resolve) => { resolveHydration = resolve; }),
-    };
-
-    const coordinator = createReplayCoordinator({ store, directoryService, sessionManager });
-    const ws = socket();
-    const ctx: any = {
-      ws, sessionManager, eventStore: store,
-      piGateway: { sendToSession() {} }, sendTo: (_w: any, msg: any) => _w.send(JSON.stringify(msg)),
-      broadcast() {}, getSubscribers: () => [ws], replayPendingUiRequests() {}, markReplaying() {}, clearReplaying() {},
-    };
-
-    const subPromise = coordinator.subscribe({ type: "subscribe", sessionId: "s", requestId: "r-async", mode: "full", windowBytes: 1024 * 1024 }, ctx);
-
-    for (let seq = 11; seq <= 14; seq += 1) {
-      coordinator.publishLive("s", { seq, event: assistantUpdate(`live update ${seq}`) });
-    }
-    coordinator.publishLive("s", { seq: 15, event: assistantEnd("live final answer") });
-
-    const persistedEvents = [
-      { eventType: "message_start", timestamp: 1, data: { message: { role: "user", content: "start tool" } } },
-      ...Array.from({ length: 9 }, (_, idx) => assistantUpdate(`persisted update ${idx + 2}`)),
-    ] as DashboardEvent[];
-
-    resolveHydration({ success: true, events: persistedEvents });
-    await subPromise;
-
-    for (let seq = 11; seq <= 14; seq += 1) {
-      store.insertEvent("s", assistantUpdate(`live update ${seq}`));
-    }
-    store.insertEvent("s", assistantEnd("live final answer"));
-
-    const replays = ws.frames.filter((frame: any) => frame.type === "event_replay");
-    const delivered = replays.flatMap((frame: any) => frame.events);
-    const deliveredSeqs = delivered.map((entry: any) => entry.seq);
-    const skippedRanges = replays.flatMap((frame: any) => (frame.skippedSeqRanges ?? []) as Array<{ fromSeq: number; toSeq: number }>);
-    const liveSeqs = ws.frames
-      .filter((frame: any) => frame.type === "event")
-      .map((frame: any) => frame.seq);
-    expect(liveSeqs).toEqual([]);
-
-    expect(deliveredSeqs).toEqual([1, 15]);
-    expect(skippedRanges).toEqual([{ fromSeq: 2, toSeq: 14 }]);
-    expect(new Set(deliveredSeqs).size).toBe(2);
-
-    const nonNoopEndEvents = delivered.filter((entry: any) => entry.event.eventType === "message_end" && Object.keys(entry.event.data ?? {}).length > 0);
-    expect(nonNoopEndEvents).toHaveLength(1);
-    expect(nonNoopEndEvents[0].event.data.message.content[0].text).toBe("live final answer");
-
-    const terminal = replays.find((frame: any) => frame.isLast);
-    expect(terminal).toMatchObject({
-      windowMinSeq: 1,
-      windowMaxSeq: 15,
-      hasMoreOlder: false,
-    });
-  });
-
-  it("claims pending live sequences represented by catch-up skipped ranges", async () => {
-    const store = createMemoryEventStore(() => false);
-    let resolveHydration!: (value: any) => void;
-    const sessionManager: any = { get: () => ({ sessionFile: "/tmp/session.jsonl" }), update() {} };
-    const directoryService: any = {
-      loadSessionEvents: () => new Promise((resolve) => { resolveHydration = resolve; }),
-    };
-    const coordinator = createReplayCoordinator({ store, directoryService, sessionManager });
-    const ws = socket();
-    const ctx: any = {
-      ws, sessionManager, eventStore: store,
-      piGateway: { sendToSession() {} }, sendTo: (_ws: any, msg: any) => _ws.send(JSON.stringify(msg)),
-      broadcast() {}, getSubscribers: () => [ws], replayPendingUiRequests() {}, markReplaying() {}, clearReplaying() {},
-    };
-
-    const pending = coordinator.subscribe({ type: "subscribe", sessionId: "s", requestId: "r-tool-catchup", mode: "full" }, ctx);
-    coordinator.publishLive("s", { seq: 2, event: { eventType: "tool_execution_start", timestamp: 2, data: { toolCallId: "call-1", toolName: "bash", args: { command: "echo hi" } } } });
-    coordinator.publishLive("s", { seq: 3, event: { eventType: "tool_execution_update", timestamp: 3, data: { toolCallId: "call-1", toolName: "bash", partialResult: "working" } } });
-    coordinator.publishLive("s", { seq: 4, event: { eventType: "tool_execution_end", timestamp: 4, data: { toolCallId: "call-1", toolName: "bash", result: "done" } } });
-
-    resolveHydration({
-      success: true,
-      events: [{ eventType: "message_start", timestamp: 1, data: { message: { role: "user", content: "run" } } }],
-    });
-    await pending;
-
-    const replays = ws.frames.filter((frame: any) => frame.type === "event_replay");
-    expect(replays.flatMap((frame: any) => frame.events.map((entry: any) => entry.seq))).toEqual([1, 4]);
-    expect(replays.flatMap((frame: any) => frame.skippedSeqRanges ?? [])).toEqual([{ fromSeq: 2, toSeq: 3 }]);
-    expect(ws.frames.filter((frame: any) => frame.type === "event")).toEqual([]);
-  });
-  it("caps each delivered tool representative's entire event.data <=20*1024 UTF-8 in tail and delta replay even when merged args+details+terminal result are oversized", async () => {
-    const store = createMemoryEventStore(() => false);
-    const toolCallId = "call_oversized_99";
-    store.insertEvent("s", {
-      eventType: "tool_execution_start",
-      timestamp: 8,
-      data: {
-        toolCallId,
-        toolName: "bash",
-        args: { command: "a".repeat(3_500), cwd: "b".repeat(3_500), env: "c".repeat(3_500), note: "d".repeat(3_500) },
-      },
-    });
-    store.insertEvent("s", {
-      eventType: "tool_execution_update",
-      timestamp: 9,
-      data: { toolCallId, toolName: "bash", details: { logA: "e".repeat(3_500), logB: "f".repeat(3_500), logC: "g".repeat(3_500), logD: "h".repeat(3_500) } },
-    });
-    store.insertEvent("s", {
-      eventType: "tool_execution_end",
-      timestamp: 10,
-      data: { toolCallId, toolName: "bash", result: { outA: "i".repeat(3_500), outB: "j".repeat(3_500), outC: "k".repeat(3_500), outD: "l".repeat(3_500) } },
-    });
-
-    const wsTail = socket();
-    const wsDelta = socket();
-    const coordinator = createReplayCoordinator({ store });
-    const ctx = (ws: any) => ({
-      ws, sessionManager: { get: () => undefined }, eventStore: store,
-      piGateway: { sendToSession() {} }, sendTo: (_w: any, msg: any) => _w.send(JSON.stringify(msg)),
-      broadcast() {}, getSubscribers: () => [wsTail, wsDelta], replayPendingUiRequests() {}, replayUiState() {}, markReplaying() {}, clearReplaying() {},
-    });
-
-    await coordinator.subscribe({ type: "subscribe", sessionId: "s", requestId: "reqTail", mode: "tail", windowBytes: 256 * 1024 }, ctx(wsTail) as any);
-    await coordinator.subscribe({ type: "subscribe", sessionId: "s", requestId: "reqDelta", lastSeq: 0, windowBytes: 256 * 1024 }, ctx(wsDelta) as any);
-
-    for (const ws of [wsTail, wsDelta]) {
-      const replays = ws.frames.filter((frame: any) => frame.type === "event_replay");
-      const deliveredToolEvents = replays
-        .flatMap((frame: any) => frame.events)
-        .filter((entry: any) => entry.event.eventType.startsWith("tool_execution_"));
-      expect(deliveredToolEvents.length).toBeGreaterThan(0);
-      for (const entry of deliveredToolEvents) {
-        const payloadBytes = new TextEncoder().encode(JSON.stringify(entry.event.data)).byteLength;
-        expect(payloadBytes).toBeLessThanOrEqual(20 * 1024);
-      }
-    }
-  });
-
-  it("delivers exact rep101 plus skipped range26..100 and terminal logical bounds 26..101 for a delta from cursor 25 over raw tool seq26..101", async () => {
-    const store = createMemoryEventStore(() => false);
-    for (let seq = 1; seq <= 25; seq += 1) {
-      store.insertEvent("s", { eventType: "message_update", timestamp: seq, data: { n: seq } });
-    }
-    for (let seq = 26; seq <= 100; seq += 1) {
-      store.insertEvent("s", {
-        eventType: "tool_execution_update",
-        timestamp: seq,
-        data: { toolCallId: "call_burst_100", toolName: "bash", progress: seq },
-      });
-    }
-    store.insertEvent("s", {
-      eventType: "tool_execution_end",
-      timestamp: 101,
-      data: { toolCallId: "call_burst_100", toolName: "bash", result: { output: "finished" } },
-    });
-
-    const ws = socket();
-    const coordinator = createReplayCoordinator({ store });
-    const ctx: any = {
-      ws, sessionManager: { get: () => undefined }, eventStore: store,
-      piGateway: { sendToSession() {} }, sendTo: (_w: any, msg: any) => _w.send(JSON.stringify(msg)),
-      broadcast() {}, getSubscribers: () => [ws], replayPendingUiRequests() {}, replayUiState() {}, markReplaying() {}, clearReplaying() {},
-    };
-
-    await coordinator.subscribe({ type: "subscribe", sessionId: "s", requestId: "delta25", lastSeq: 25, windowBytes: 256 * 1024 }, ctx);
-
-    const replays = ws.frames.filter((frame: any) => frame.type === "event_replay");
-    const deliveredEvents = replays.flatMap((frame: any) => frame.events);
-
-    expect(replays.flatMap((frame: any) => frame.skippedSeqRanges ?? [])).toEqual([
-      { fromSeq: 26, toSeq: 100 },
-    ]);
-
-    const rep101Entry = deliveredEvents.find((entry: any) => entry.seq === 101);
-    expect(rep101Entry).toBeDefined();
-    expect(rep101Entry.event.eventType).toBe("tool_execution_end");
-
-    const terminalFrame = replays.find((frame: any) => frame.isLast);
-    expect(terminalFrame).toMatchObject({
-      windowMinSeq: 26,
-      windowMaxSeq: 101,
-    });
   });
 
 });

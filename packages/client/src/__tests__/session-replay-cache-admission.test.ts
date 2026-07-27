@@ -1,11 +1,11 @@
-import { replayEntriesAsEvents } from "@blackbelt-technology/pi-dashboard-shared/state-replay.js";
-import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { IDBFactory } from "fake-indexeddb";
 import { describe, expect, it } from "vitest";
+import { replayEntriesAsEvents } from "@blackbelt-technology/pi-dashboard-shared/state-replay.js";
+import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { SessionReplayController } from "../hooks/useSessionReplayController.js";
 import { createInitialState, reduceEvent, type SessionState } from "../lib/event-reducer.js";
+import { createReplayCache, type CachedEvent } from "../lib/replay-cache.js";
 import { rehydrateSession } from "../lib/rehydrate-session.js";
-import { type CachedEvent, createReplayCache } from "../lib/replay-cache.js";
 
 function reduceEntries(state: SessionState, entries: readonly CachedEvent[]): SessionState {
   return entries.reduce((current, entry) => reduceEvent(current, entry.event), state);
@@ -71,7 +71,7 @@ describe("session replay cache admission", () => {
     // update that raced the async read would have a different identity here.
     const stateAtAdmission = sessionStates.get(sessionId);
     const ledger = controller.ledger(sessionId);
-    expect(ledger.seed(scope.sourceGeneration, rehydrated!.events, rehydrated!.skippedSeqRanges)).toBe(true);
+    expect(ledger.seed(scope.sourceGeneration, rehydrated!.events)).toBe(true);
     const admitted = new Map(sessionStates);
     if (admitted.get(sessionId) === stateAtAdmission) {
       admitted.set(sessionId, rehydrated!.state);
