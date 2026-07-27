@@ -29,19 +29,17 @@
  * mobile-session-rehydration.
  */
 
-import type { SkippedSeqRange } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
 import { selectNewestEventsByBudget } from "@blackbelt-technology/pi-dashboard-shared/event-window.js";
-import { DEFAULT_MAX_TOOL_PAYLOAD_BYTES, prepareEventForReplay } from "@blackbelt-technology/pi-dashboard-shared/prepare-event-for-replay.js";
-import { computeLogicalSeqBounds, normalizeSkippedSeqRanges, retainSkippedSeqRangesForEventSuffix } from "@blackbelt-technology/pi-dashboard-shared/replay-projection.js";
+import { prepareEventForReplay } from "@blackbelt-technology/pi-dashboard-shared/prepare-event-for-replay.js";
 import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { DEFAULT_REPLAY_RETENTION_BYTES } from "./replay-retention.js";
 
 /** Bump on any persisted-shape change → all entries invalidate (full replay).
  *  v2: over-budget put trims to newest-by-byte-budget instead of drop-all.
  *  v3: server-scoped entry shape (key, serverEpoch, sourceGeneration, minSeq, window
- *      metadata, prepared suffix) + IDB store keyed by the composite `key`.
- *  v4: skippedSeqRanges coverage preservation. */
-export const REPLAY_CACHE_SCHEMA_VERSION = 4;
+ *      metadata, prepared suffix) + IDB store keyed by the composite `key`. */
+export const REPLAY_CACHE_SCHEMA_VERSION = 3;
+
 const DB_NAME = "pi-dashboard-replay-cache";
 const STORE = "sessions";
 const DB_VERSION = 2;
@@ -49,12 +47,6 @@ const DEFAULT_MAX_ENTRIES = 50;
 /** Per-session payload byte budget. Over → trim-on-put. */
 export const DEFAULT_MAX_BYTES_PER_SESSION = DEFAULT_REPLAY_RETENTION_BYTES
 
-const encoder = new TextEncoder();
-function computePayloadAndRangesBytes(payload: CachedEvent[], ranges?: SkippedSeqRange[]): number {
-  const payloadBytes = encoder.encode(JSON.stringify(payload)).byteLength;
-  const rangesBytes = ranges && ranges.length > 0 ? encoder.encode(JSON.stringify(ranges)).byteLength : 0;
-  return payloadBytes + rangesBytes;
-}
 export interface CachedEvent {
   seq: number;
   event: DashboardEvent;
@@ -93,15 +85,13 @@ export interface ReplayCacheEntry {
   partialHead?: boolean;
   /** UTF-8 size of the retained `{seq,event}` envelopes (window metadata). */
   bytes?: number;
-  skippedSeqRanges?: SkippedSeqRange[];
 }
 
 export interface ReplayCachePut {
   maxSeq: number;
-  minSeq?: number;
   payload: CachedEvent[];
-  skippedSeqRanges?: SkippedSeqRange[];
 }
+
 export interface ReplayCacheOptions {
   /** Injectable IndexedDB factory (tests pass a fresh `new IDBFactory()`). */
   factory?: IDBFactory;
@@ -380,57 +370,36 @@ export function createReplayCache(opts: ReplayCacheOptions = {}): ReplayCache {
       // cache tail ≈ first paint tail (design D1). The returned events are
       // prepared (prepareEventForReplay) and bounded by the UTF-8 budget.
       const window = selectNewestEventsByBudget(
-        value.payload.map(({ seq, event }) => ({
-          seq,
-          event: prepareEventForReplay(event, { maxToolPayloadBytes: DEFAULT_MAX_TOOL_PAYLOAD_BYTES }).event,
-        })),
+        value.payload.map(({ seq, event }) => ({ seq, event: prepareEventForReplay(event).event })),
         maxBytesPerSession,
-        {
-          skippedSeqRanges: value.skippedSeqRanges,
-          maxToolPayloadBytes: DEFAULT_MAX_TOOL_PAYLOAD_BYTES,
-        },
       );
       let payload = window.events;
       let minSeq = window.windowMinSeq;
       let maxSeq = window.windowMaxSeq ?? value.maxSeq;
       let hasMoreOlder = window.hasMoreOlder;
       let partialHead = window.partialHead;
-
-      const candidateRanges = normalizeSkippedSeqRanges([
-        ...(value.skippedSeqRanges ?? []),
-        ...(window.skippedSeqRanges ?? []),
-      ]);
-      let retainedRanges = retainSkippedSeqRangesForEventSuffix(payload, candidateRanges);
-
-      while (
-        payload.length > 0 &&
-        computePayloadAndRangesBytes(payload, retainedRanges) > maxBytesPerSession
-      ) {
+      // Recheck the full array serialization: selectNewestEventsByBudget sums
+      // per-entry JSON.stringify length, but the persisted array adds commas +
+      // brackets, so the trimmed window can still exceed maxBytesPerSession.
+      // Drop oldest remaining events until the array fits or the window empties.
+      while (payload.length > 0 && new TextEncoder().encode(JSON.stringify(payload)).byteLength > maxBytesPerSession) {
         payload = payload.slice(1);
-        retainedRanges = retainSkippedSeqRangesForEventSuffix(payload, candidateRanges);
       }
-
       if (payload.length === 0) {
         if (allowed()) await rawDel(key);
         return;
       }
-
-      retainedRanges = retainSkippedSeqRangesForEventSuffix(payload, candidateRanges);
-      const bounds = computeLogicalSeqBounds(payload, retainedRanges);
-      const finalMin = bounds.minSeq ?? payload[0]!.seq;
-      const finalMax = bounds.maxSeq ?? payload[payload.length - 1]!.seq;
-
+      // Recompute contiguous bounds + flags after the recheck-slice dropped
+      // oldest events from the window.
+      const finalMin = payload[0]!.seq;
+      const finalMax = payload[payload.length - 1]!.seq;
       if (finalMin !== minSeq) {
         hasMoreOlder = true;
         partialHead = true;
         minSeq = finalMin;
       }
       maxSeq = finalMax;
-
       if (!allowed()) return;
-
-      const totalBytes = computePayloadAndRangesBytes(payload, retainedRanges);
-
       const entry: ReplayCacheEntry = {
         key,
         sessionId,
@@ -443,9 +412,9 @@ export function createReplayCache(opts: ReplayCacheOptions = {}): ReplayCache {
         minSeq,
         hasMoreOlder,
         partialHead,
-        bytes: totalBytes,
-        skippedSeqRanges: retainedRanges.length > 0 ? retainedRanges : undefined,
+        bytes: new TextEncoder().encode(JSON.stringify(payload)).byteLength,
       };
+      // Check both sides of the durable mutation. A drop during preparation or
       // IndexedDB completion wins and removes the provisional value.
       if (!allowed()) return;
       if (beforePutCommit) await beforePutCommit();
@@ -501,7 +470,7 @@ export function createReplayCache(opts: ReplayCacheOptions = {}): ReplayCache {
       let payload = value.payload;
       let maxSeq = value.maxSeq;
       if (new TextEncoder().encode(JSON.stringify(payload)).byteLength > maxBytesPerSession) {
-        const windowed = selectNewestEventsByBudget(payload, maxBytesPerSession, { skippedSeqRanges: value.skippedSeqRanges });
+        const windowed = selectNewestEventsByBudget(payload, maxBytesPerSession);
         payload = windowed.events;
         maxSeq = windowed.windowMaxSeq || maxSeqOf(payload) || maxSeq;
       }

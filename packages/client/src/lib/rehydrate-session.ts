@@ -1,5 +1,3 @@
-import type { SkippedSeqRange } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
-import { isCoverageContiguous } from "@blackbelt-technology/pi-dashboard-shared/replay-projection.js";
 import { createInitialState, reduceEvent, type SessionState } from "./event-reducer.js";
 import type { CachedEvent, ReplayCache, ReplayCacheScope } from "./replay-cache.js";
 
@@ -8,7 +6,6 @@ export interface RehydratedSession {
   state: SessionState;
   /** Ascending canonical entries shared with chat, plugin store, and persister. */
   events: CachedEvent[];
-  skippedSeqRanges?: SkippedSeqRange[];
   pluginEvents: CachedEvent["event"][];
   minSeq: number;
   sourceGeneration?: string;
@@ -42,12 +39,11 @@ function sleepTurn(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-function canonicalPayload(payload: readonly CachedEvent[], skippedSeqRanges: readonly SkippedSeqRange[] = []): CachedEvent[] | null {
+function canonicalPayload(payload: readonly CachedEvent[]): CachedEvent[] | null {
   const entries = [...payload].sort((a, b) => a.seq - b.seq);
   for (let index = 1; index < entries.length; index += 1) {
-    if (entries[index - 1]!.seq >= entries[index]!.seq) return null;
+    if (entries[index - 1]!.seq + 1 !== entries[index]!.seq) return null;
   }
-  if (!isCoverageContiguous(entries, skippedSeqRanges)) return null;
   return entries;
 }
 
@@ -108,9 +104,8 @@ export async function rehydrateSession(
   }
   if (timedOut || aborted || stale(authority) || !entry) return null;
 
-  const skippedSeqRanges = entry.skippedSeqRanges ?? [];
-  const entries = canonicalPayload(entry.payload, skippedSeqRanges);
-  if (!entries || (entries.length === 0 && skippedSeqRanges.length === 0)) {
+  const entries = canonicalPayload(entry.payload);
+  if (!entries || entries.length === 0) {
     // Bad data is scoped poison. Never delete another server/source's cache.
     if (!stale(authority)) await cache.deleteScoped(authority.scope, sessionId);
     return null;
@@ -132,13 +127,12 @@ export async function rehydrateSession(
     if (stale(authority)) return null;
     return {
       lastSeq: entry.maxSeq,
-      minSeq: entry.minSeq ?? (entries[0]?.seq ?? skippedSeqRanges[0]?.fromSeq ?? 0),
+      minSeq: entry.minSeq ?? entries[0]!.seq,
       sourceGeneration: entry.sourceGeneration,
       hasMoreOlder: entry.hasMoreOlder ?? false,
       partialHead: entry.partialHead ?? false,
       state,
       events: entries,
-      skippedSeqRanges,
       pluginEvents: entries.map(({ event }) => event),
     };
   } catch {

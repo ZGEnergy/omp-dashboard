@@ -34,7 +34,6 @@ export interface InlineReplayAsset {
 export interface PrepareEventForReplayOptions {
   maxTextBytes?: number;
   maxEventBytes?: number;
-  maxToolPayloadBytes?: number;
   registerInlineAsset?: (asset: InlineReplayAsset) => string | undefined;
 }
 
@@ -181,32 +180,6 @@ export function truncateReplayText(
   const markerBytes = utf8ByteLength(REPLAY_BYTE_TRUNCATION_MARKER);
   if (markerBytes >= limit) return suffixWithinUtf8Budget(REPLAY_BYTE_TRUNCATION_MARKER, limit);
   return REPLAY_BYTE_TRUNCATION_MARKER + suffixWithinUtf8Budget(text, limit - markerBytes);
-}
-
-export function truncateStructuredResult(value: unknown, maxTextBytes: number | undefined, issues: ReplayPreparationIssue[]): unknown {
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    const rec = value as Record<string, unknown>;
-    if (Array.isArray(rec.content)) {
-      const contentBlocks: unknown[] = [];
-      for (const block of rec.content) {
-        if (block && typeof block === "object" && !Array.isArray(block)) {
-          const bRec = block as Record<string, unknown>;
-          if (typeof bRec.text === "string") {
-            contentBlocks.push({
-              ...bRec,
-              text: truncateReplayText(bRec.text, maxTextBytes, issues),
-            });
-          } else {
-            contentBlocks.push(bRec);
-          }
-        } else {
-          contentBlocks.push(block);
-        }
-      }
-      return { ...rec, content: contentBlocks };
-    }
-  }
-  return truncateReplayText(value, maxTextBytes, issues);
 }
 
 interface AssetRewriteState {
@@ -447,596 +420,60 @@ function collectAssetHashes(
   }
 }
 
-const PRIORITY_KEYS = new Set([
-  "toolcallid",
-  "callid",
-  "tool_call_id",
-  "description",
-  "tags",
-  "error",
-  "errors",
-  "errorcode",
-  "errormessage",
-  "name",
-  "tool",
-  "toolname",
-  "tool_name",
-  "id",
-  "role",
-  "status",
-  "state",
-  "stats",
-  "statistics",
-  "type",
-  "eventtype",
-  "event_type",
-  "seq",
-  "timestamp",
-  "mimetype",
-  "hash",
-  "src",
-  "channel",
-  "command",
-  "action",
-  "mode",
-  "kind",
-  "label",
-  "reason",
-  "path",
-  "tooluses",
-  "tokens",
-  "tokensusage",
-  "agentmdpath",
-  "inputtokens",
-  "outputtokens",
-  "totaltokens",
-  "turncount",
-  "maxturns",
-  "durationms",
-  "iserror",
-  "agent",
-  "agentid",
-  "model",
-  "session",
-  "sessionid",
-]);
-
-const BULKY_KEYS = new Set([
-  "content",
-  "output",
-  "entries",
-  "result",
-  "stdout",
-  "stderr",
-  "diff",
-  "logs",
-  "body",
-  "response",
-  "payload",
-  "buffer",
-  "raw",
-  "details",
-]);
-
-function isPriorityKey(key: string | number): boolean {
-  if (typeof key === "number") return false;
-  const k = key.toString().toLowerCase();
-  if (BULKY_KEYS.has(k)) return false;
-  if (PRIORITY_KEYS.has(k)) return true;
-  return (
-    k.endsWith("status") ||
-    k.includes("stats") ||
-    k.endsWith("tag") ||
-    k.endsWith("tags") ||
-    k.includes("error") ||
-    k.includes("description") ||
-    k.includes("tokensusage") ||
-    k.includes("agentmdpath") ||
-    k.includes("toolcallid") ||
-    k.includes("toolname") ||
-    k.endsWith("id") ||
-    k.endsWith("count") ||
-    k.endsWith("ms") ||
-    k.endsWith("turns") ||
-    k.endsWith("uses") ||
-    k.endsWith("mode")
-  );
-}
-
-function isBulkyKey(key: string | number): boolean {
-  if (typeof key === "number") return false;
-  const k = key.toString().toLowerCase();
-  if (BULKY_KEYS.has(k)) return true;
-  return (
-    k.includes("content") ||
-    k.includes("output") ||
-    k.includes("entries") ||
-    k.includes("stdout") ||
-    k.includes("stderr")
-  );
-}
-
-function computeKeyPriorityRank(key: string | number, value: string): number {
-  if (isPriorityKey(key)) {
-    return 2;
-  }
-  if (isBulkyKey(key)) {
-    return 0;
-  }
-  return 1;
-}
-
 type StringParent = Record<string, unknown> | unknown[];
 interface StringLocation {
   parent: StringParent;
   key: string | number;
   value: string;
   bytes: number;
-  priorityRank: number;
-  isPriority: boolean;
 }
 
-function collectStringLocations(
-  value: unknown,
-  locations: StringLocation[],
-  parentKey?: string | number,
-): void {
+function collectStringLocations(value: unknown, locations: StringLocation[]): void {
   if (Array.isArray(value)) {
     for (let index = 0; index < value.length; index += 1) {
       const child = value[index];
       if (typeof child === "string") {
-        const keyForCheck = parentKey !== undefined ? parentKey : index;
-        const priorityRank = computeKeyPriorityRank(keyForCheck, child);
-        const isPriority = priorityRank === 2;
-        locations.push({ parent: value, key: index, value: child, bytes: utf8ByteLength(child), priorityRank, isPriority });
-      } else collectStringLocations(child, locations, index);
+        locations.push({ parent: value, key: index, value: child, bytes: utf8ByteLength(child) });
+      } else collectStringLocations(child, locations);
     }
   } else if (value && typeof value === "object") {
     const record = value as Record<string, unknown>;
     for (const [key, child] of Object.entries(record)) {
       if (typeof child === "string") {
-        const priorityRank = computeKeyPriorityRank(key, child);
-        const isPriority = priorityRank === 2;
-        locations.push({ parent: record, key, value: child, bytes: utf8ByteLength(child), priorityRank, isPriority });
-      } else collectStringLocations(child, locations, key);
+        locations.push({ parent: record, key, value: child, bytes: utf8ByteLength(child) });
+      } else collectStringLocations(child, locations);
     }
   }
-}
-function truncateReplayJsonText(value: unknown, maxBytes: number | undefined, issues: ReplayPreparationIssue[]): string {
-  const source = String(value ?? "");
-  const limit = Number.isFinite(maxBytes) && maxBytes! > 0 ? Math.floor(maxBytes!) : Number.POSITIVE_INFINITY;
-  if (utf8ByteLength(JSON.stringify(source)) <= limit) return source;
-  let target = Math.max(1, limit - utf8ByteLength(JSON.stringify(REPLAY_BYTE_TRUNCATION_MARKER)));
-  for (let attempt = 0; attempt < 16; attempt += 1) {
-    const truncated = REPLAY_BYTE_TRUNCATION_MARKER + suffixWithinUtf8Budget(source, target);
-    if (utf8ByteLength(JSON.stringify(truncated)) <= limit) {
-      addIssue(issues, "event_truncated", "tool_payload_limit");
-      return truncated;
-    }
-    target = Math.max(1, Math.floor(target / 2));
-  }
-  addIssue(issues, "event_truncated", "tool_payload_limit");
-  return "";
-}
-
-export const DEFAULT_MAX_TOOL_PAYLOAD_BYTES = 20 * 1024;
-
-function capResultOrContent(value: unknown, limit: number, issues: ReplayPreparationIssue[]): unknown {
-  if (typeof value === "string") {
-    if (value === "{}") return {};
-    if (value === "[]") return [];
-    return truncateReplayText(value, limit, issues);
-  }
-  if (typeof value === "object" && value !== null) {
-    if (Array.isArray(value)) {
-      if (value.length === 0) return [];
-      return truncateReplayText(JSON.stringify(value), limit, issues);
-    }
-    const obj = value as Record<string, unknown>;
-    if (Object.keys(obj).length === 0) {
-      return {};
-    }
-    if (Array.isArray(obj.content)) {
-      const contentBlocks: unknown[] = [];
-      for (const block of obj.content) {
-        if (block && typeof block === "object" && !Array.isArray(block)) {
-          const bRec = block as Record<string, unknown>;
-          if (typeof bRec.text === "string") {
-            contentBlocks.push({
-              type: bRec.type ?? "text",
-              text: truncateReplayText(bRec.text, limit, issues),
-            });
-          } else {
-            contentBlocks.push(bRec);
-          }
-        } else {
-          contentBlocks.push(block);
-        }
-      }
-      return { content: contentBlocks };
-    }
-    if (typeof obj.text === "string") {
-      return { text: truncateReplayText(obj.text, limit, issues) };
-    }
-    return truncateReplayText(JSON.stringify(obj), limit, issues);
-  }
-  return value;
-}
-
-function capToolEventPayload(
-  eventType: string,
-  data: Record<string, unknown>,
-  toolCapBytes: number,
-  issues: ReplayPreparationIssue[],
-): Record<string, unknown> {
-  const limit = Number.isFinite(toolCapBytes) && toolCapBytes > 0
-    ? Math.floor(toolCapBytes)
-    : DEFAULT_MAX_TOOL_PAYLOAD_BYTES;
-
-  const rawBytes = utf8ByteLength(JSON.stringify(data));
-  if (rawBytes <= limit) {
-    return data;
-  }
-
-  addIssue(issues, "event_truncated", "tool_payload_limit");
-
-  const priorityKeys = [
-    "toolCallId",
-    "callId",
-    "toolName",
-    "tool",
-    "name",
-    "agentId",
-    "state",
-    "status",
-    "activity",
-    "displayName",
-    "title",
-    "subagentType",
-    "modelName",
-    "description",
-    "toolUses",
-    "tokens",
-    "tokensUsage",
-    "agentMdPath",
-    "turnCount",
-    "maxTurns",
-    "durationMs",
-    "tags",
-    "error",
-    "id",
-    "role",
-    "seq",
-    "timestamp",
-    "command",
-    "path",
-    "exitCode",
-    "mode",
-    "agent",
-  ];
-
-  const extractCappedDetails = (rawDetails: Record<string, unknown>): Record<string, unknown> => {
-    const details: Record<string, unknown> = { truncated: true };
-    for (const key of priorityKeys) {
-      if (rawDetails[key] !== undefined) {
-        details[key] = rawDetails[key];
-      }
-    }
-    return details;
-  };
-
-  const capped: Record<string, unknown> = {};
-
-  for (const [k, v] of Object.entries(data)) {
-    if (isPriorityKey(k) || priorityKeys.includes(k)) {
-      if (typeof v === "object" && v !== null) {
-        capped[k] = pruneDataPreservingPriority(v, k);
-      } else {
-        capped[k] = v;
-      }
-    }
-  }
-  if (data.args !== undefined) {
-    if (typeof data.args === "object" && data.args !== null && !Array.isArray(data.args)) {
-      const rawArgs = data.args as Record<string, unknown>;
-      const cappedArgs: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(rawArgs)) {
-        if (priorityKeys.includes(k) || isPriorityKey(k)) {
-          cappedArgs[k] = v;
-        } else if (typeof v === "number" || typeof v === "boolean" || v === null) {
-          cappedArgs[k] = v;
-        } else if (typeof v === "string") {
-          cappedArgs[k] = v.length > 256 ? truncateReplayText(v, limit, issues) : v;
-        } else if (Array.isArray(v)) {
-          if (k === "tags" || (v.length <= 100 && v.every((x) => typeof x === "string" || typeof x === "number" || typeof x === "boolean"))) {
-            cappedArgs[k] = v;
-          } else {
-            cappedArgs[k] = [REPLAY_BYTE_TRUNCATION_MARKER];
-          }
-        } else if (typeof v === "object" && v !== null) {
-          if (k === "details") {
-            cappedArgs[k] = extractCappedDetails(v as Record<string, unknown>);
-          } else {
-            const innerObj = v as Record<string, unknown>;
-            const innerCapped: Record<string, unknown> = {};
-            for (const [ik, iv] of Object.entries(innerObj)) {
-              if (priorityKeys.includes(ik) || isPriorityKey(ik) || typeof iv === "number" || typeof iv === "boolean" || iv === null) {
-                innerCapped[ik] = iv;
-              }
-            }
-            cappedArgs[k] = innerCapped;
-          }
-        }
-      }
-      capped.args = cappedArgs;
-    } else if (typeof data.args === "string") {
-      capped.args = truncateReplayText(data.args, limit, issues);
-    } else {
-      capped.args = data.args;
-    }
-  }
-
-  let textSource: string | undefined;
-  let textTargetSetter: ((txt: string) => void) | undefined;
-
-  if (eventType === "tool_execution_end") {
-    if (data.details && typeof data.details === "object" && !Array.isArray(data.details)) {
-      capped.details = extractCappedDetails(data.details as Record<string, unknown>);
-    }
-
-    if (data.result === "") {
-      capped.result = "";
-    } else if (data.result !== undefined) {
-      const res = capResultOrContent(data.result, limit, issues);
-      capped.result = res;
-      if (typeof res === "string") {
-        textSource = String(data.result);
-        textTargetSetter = (txt) => { capped.result = txt; };
-      } else if (res && typeof res === "object" && Array.isArray((res as any).content)) {
-        const c0 = (res as any).content[0];
-        if (c0 && typeof c0 === "object" && typeof c0.text === "string") {
-          textSource = String(((data.result as any)?.content?.[0] as any)?.text ?? c0.text);
-          textTargetSetter = (txt) => { (capped.result as any).content = [{ type: c0.type ?? "text", text: txt }]; };
-        }
-      }
-    }
-  } else {
-    // tool_execution_update
-    let rawDetails: Record<string, unknown> | undefined;
-    if (
-      data.partialResult &&
-      typeof data.partialResult === "object" &&
-      !Array.isArray(data.partialResult) &&
-      (data.partialResult as Record<string, unknown>).details &&
-      typeof (data.partialResult as Record<string, unknown>).details === "object"
-    ) {
-      rawDetails = (data.partialResult as Record<string, unknown>).details as Record<string, unknown>;
-    } else if (data.details && typeof data.details === "object" && !Array.isArray(data.details)) {
-      rawDetails = data.details as Record<string, unknown>;
-    }
-
-    const cappedDetails = rawDetails ? extractCappedDetails(rawDetails) : undefined;
-    const rawPR = data.partialResult;
-
-    if (rawPR === "") {
-      capped.partialResult = cappedDetails ? { details: cappedDetails } : "";
-    } else if (rawPR !== undefined) {
-      if (typeof rawPR === "string") {
-        const text = truncateReplayText(rawPR, limit, issues);
-        capped.partialResult = cappedDetails ? { details: cappedDetails, content: text } : text;
-        textSource = rawPR;
-        textTargetSetter = (txt) => {
-          capped.partialResult = cappedDetails ? { details: cappedDetails, content: txt } : txt;
-        };
-      } else if (typeof rawPR === "object" && rawPR !== null) {
-        const prObj = rawPR as Record<string, unknown>;
-        const prCapped: Record<string, unknown> = {};
-        if (cappedDetails) {
-          prCapped.details = cappedDetails;
-        }
-
-        if (Array.isArray(prObj.content)) {
-          const c0 = prObj.content[0];
-          let blockText = "";
-          if (c0 && typeof c0 === "object" && typeof (c0 as any).text === "string") {
-            blockText = (c0 as any).text;
-          }
-          prCapped.content = [{ type: "text", text: truncateReplayText(blockText, limit, issues) }];
-          textSource = blockText;
-          textTargetSetter = (txt) => {
-            (capped.partialResult as any).content = [{ type: "text", text: txt }];
-          };
-        } else if (typeof prObj.text === "string") {
-          prCapped.text = truncateReplayText(prObj.text, limit, issues);
-          textSource = prObj.text;
-          textTargetSetter = (txt) => {
-            (capped.partialResult as any).text = txt;
-          };
-        }
-
-        capped.partialResult = prCapped;
-      } else {
-        capped.partialResult = rawPR;
-      }
-    } else if (cappedDetails) {
-      capped.partialResult = { details: cappedDetails };
-    }
-  }
-
-  for (const [k, v] of Object.entries(data)) {
-    if (
-      k !== "toolCallId" &&
-      k !== "toolName" &&
-      k !== "args" &&
-      k !== "isError" &&
-      k !== "details" &&
-      k !== "result" &&
-      k !== "partialResult" &&
-      !(k in capped)
-    ) {
-      if (typeof v === "string" || typeof v === "number" || typeof v === "boolean" || v === null) {
-        capped[k] = v;
-      }
-    }
-  }
-
-  let currentBytes = utf8ByteLength(JSON.stringify(capped));
-  if (currentBytes > limit && textSource && textTargetSetter) {
-    const markerOverhead = utf8ByteLength(JSON.stringify(REPLAY_BYTE_TRUNCATION_MARKER));
-    const baseOverhead = currentBytes - utf8ByteLength(JSON.stringify(textSource));
-    let allowedTextBytes = Math.max(1, limit - baseOverhead - markerOverhead - 32);
-
-    for (let attempt = 0; attempt < 8; attempt += 1) {
-      const truncatedText = truncateReplayText(textSource, allowedTextBytes, issues);
-      textTargetSetter(truncatedText);
-      currentBytes = utf8ByteLength(JSON.stringify(capped));
-      if (currentBytes <= limit) break;
-      allowedTextBytes = Math.max(1, Math.floor(allowedTextBytes / 2));
-    }
-  }
-
-  if (currentBytes > limit && capped.args && typeof capped.args === "object" && !Array.isArray(capped.args)) {
-    const argsObj = capped.args as Record<string, unknown>;
-    const stringEntries = Object.entries(argsObj)
-      .filter(([k, v]) => typeof v === "string" && !priorityKeys.includes(k) && !isPriorityKey(k))
-      .map(([k, v]) => ({ key: k, value: v as string, bytes: utf8ByteLength(v as string) }))
-      .sort((a, b) => b.bytes - a.bytes);
-
-    for (const item of stringEntries) {
-      if (currentBytes <= limit) break;
-      const over = currentBytes - limit;
-      const target = Math.max(10, item.bytes - over - 64);
-      argsObj[item.key] = truncateReplayText(item.value, target, issues);
-      currentBytes = utf8ByteLength(JSON.stringify(capped));
-    }
-  }
-
-  if (utf8ByteLength(JSON.stringify(capped)) > limit) {
-    if (capped.details && typeof capped.details === "object") {
-      capped.details = extractCappedDetails(capped.details as Record<string, unknown>);
-    }
-    if (
-      capped.partialResult &&
-      typeof capped.partialResult === "object" &&
-      (capped.partialResult as any).details
-    ) {
-      (capped.partialResult as any).details = extractCappedDetails(
-        (capped.partialResult as any).details as Record<string, unknown>,
-      );
-    }
-  }
-
-  if (utf8ByteLength(JSON.stringify(capped)) > limit) {
-    const minimal = pruneDataPreservingPriority(data) as Record<string, unknown>;
-    if (eventType === "tool_execution_end") {
-      if (data.result === "") minimal.result = "";
-      else if (data.result && typeof data.result === "object" && Object.keys(data.result as object).length === 0) {
-        minimal.result = Array.isArray(data.result) ? [] : {};
-      }
-    } else {
-      if (data.partialResult === "") minimal.partialResult = "";
-    }
-    return utf8ByteLength(JSON.stringify(minimal)) <= limit ? minimal : {
-      toolCallId: typeof data.toolCallId === "string" ? data.toolCallId.slice(0, 32) : "",
-      toolName: typeof data.toolName === "string" ? data.toolName.slice(0, 32) : "",
-      ...(data.result && typeof data.result === "object" && Object.keys(data.result as object).length === 0
-        ? { result: Array.isArray(data.result) ? [] : {} }
-        : {}),
-    };
-  }
-
-  return capped;
-}
-
-
-
-function pruneDataPreservingPriority(data: unknown, parentKey?: string | number): unknown {
-  if (data === null || data === undefined) return data;
-  if (typeof data === "number" || typeof data === "boolean") return data;
-  if (typeof data === "string") {
-    if (parentKey !== undefined && isPriorityKey(parentKey)) {
-      return data;
-    }
-    return REPLAY_BYTE_TRUNCATION_MARKER;
-  }
-  if (Array.isArray(data)) {
-    if (data.length === 0) return [];
-    if (parentKey !== undefined && isPriorityKey(parentKey)) {
-      return data.map((item) => pruneDataPreservingPriority(item, parentKey));
-    }
-    const prunedList = data.map((item) => pruneDataPreservingPriority(item, parentKey)).filter((item) => item !== undefined);
-    return prunedList;
-  }
-  if (typeof data === "object") {
-    const record = data as Record<string, unknown>;
-    const keys = Object.keys(record);
-    if (keys.length === 0) return {};
-    const pruned: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(record)) {
-      if (isPriorityKey(k) || (parentKey !== undefined && isPriorityKey(parentKey))) {
-        pruned[k] = pruneDataPreservingPriority(v, k);
-      } else if (v && typeof v === "object") {
-        if (Array.isArray(v)) {
-          if (v.length === 0) pruned[k] = [];
-          else {
-            const innerPruned = pruneDataPreservingPriority(v, k);
-            pruned[k] = Array.isArray(innerPruned) ? innerPruned : [];
-          }
-        } else {
-          const innerKeys = Object.keys(v as object);
-          if (innerKeys.length === 0) {
-            pruned[k] = {};
-          } else {
-            const innerPruned = pruneDataPreservingPriority(v, k);
-            pruned[k] = innerPruned;
-          }
-        }
-      } else if (typeof v === "number" || typeof v === "boolean" || v === null) {
-        pruned[k] = v;
-      }
-    }
-    return pruned;
-  }
-  return data;
 }
 
 function boundEventBytes(
   event: DashboardEvent,
   maxEventBytes: number,
   issues: ReplayPreparationIssue[],
-  maxToolPayloadBytes?: number,
 ): DashboardEvent {
   const limit = Number.isFinite(maxEventBytes) && maxEventBytes > 0
     ? Math.floor(maxEventBytes)
     : MAX_REPLAY_EVENT_BYTES;
-  const toolCapApplies = maxToolPayloadBytes !== undefined && event.eventType.startsWith("tool_execution_");
-  const toolDataLimit = toolCapApplies ? maxToolPayloadBytes : Number.POSITIVE_INFINITY;
   let bytes = utf8ByteLength(JSON.stringify(event));
-  let dataBytes = utf8ByteLength(JSON.stringify(event.data));
-  if (bytes <= limit && (!toolCapApplies || dataBytes <= toolDataLimit)) return event;
+  if (bytes <= limit) return event;
 
   const locations: StringLocation[] = [];
   collectStringLocations(event.data, locations);
-  locations.sort((left, right) => {
-    if (left.priorityRank !== right.priorityRank) {
-      return left.priorityRank - right.priorityRank;
-    }
-    return right.bytes - left.bytes;
-  });
-
+  locations.sort((left, right) => right.bytes - left.bytes);
+  // Bounded multi-pass shrink: a single pass sizes the replacement from its
+  // raw UTF-8 byte length, but the wire size is its JSON-serialized length —
+  // `REPLAY_BYTE_TRUNCATION_MARKER`'s embedded `\n` escapes to `\n` (+1 byte)
+  // under JSON.stringify, so a target computed to land exactly at `limit` can
+  // still serialize a few bytes over. Re-scan and re-shrink until the event
+  // actually fits (or no location can shrink further), instead of falling
+  // straight to the full-data `replayUnavailable` wipe on a near-boundary miss.
   const markerBytes = utf8ByteLength(REPLAY_BYTE_TRUNCATION_MARKER);
-  for (let pass = 0; pass < 5; pass++) {
-    if (bytes <= limit && (!toolCapApplies || dataBytes <= toolDataLimit)) break;
+  for (let pass = 0; pass < 5 && bytes > limit; pass++) {
     let progressed = false;
     for (const location of locations) {
-      if (bytes <= limit && (!toolCapApplies || dataBytes <= toolDataLimit)) break;
-      if (location.priorityRank === 2) continue;
-      const overage = Math.max(
-        bytes > limit ? bytes - limit : 0,
-        toolCapApplies && dataBytes > toolDataLimit ? dataBytes - toolDataLimit : 0,
-      );
+      if (bytes <= limit) break;
+      const overage = bytes - limit;
       const current = location.parent[location.key as never] as unknown as string;
-      if (typeof current !== "string") continue;
       const currentBytes = utf8ByteLength(current);
       const target = Math.max(1, currentBytes - overage - markerBytes);
       const replacement = REPLAY_BYTE_TRUNCATION_MARKER + suffixWithinUtf8Budget(location.value, target);
@@ -1044,51 +481,21 @@ function boundEventBytes(
       location.parent[location.key as never] = replacement as never;
       progressed = true;
       bytes = utf8ByteLength(JSON.stringify(event));
-      dataBytes = utf8ByteLength(JSON.stringify(event.data));
     }
     if (!progressed) break;
   }
 
   addIssue(issues, "event_truncated", "event_byte_limit");
-  if (bytes <= limit && (!toolCapApplies || dataBytes <= toolDataLimit)) return event;
-
-  const priorityPreservedData = pruneDataPreservingPriority(event.data) as Record<string, unknown>;
+  if (bytes <= limit) return event;
   const fallback: DashboardEvent = {
     ...event,
-    data: priorityPreservedData,
+    data: { replayUnavailable: true },
   };
-  bytes = utf8ByteLength(JSON.stringify(fallback));
-  dataBytes = utf8ByteLength(JSON.stringify(fallback.data));
-  if (bytes <= limit && (!toolCapApplies || dataBytes <= toolDataLimit)) return fallback;
-
-  return {
+  return utf8ByteLength(JSON.stringify(fallback)) <= limit ? fallback : {
     eventType: event.eventType.slice(0, 32),
     timestamp: event.timestamp,
-    data: priorityPreservedData,
+    data: {},
   };
-}
-
-function deepClonePlain(value: unknown, seen = new WeakMap<object, unknown>()): unknown {
-  if (value === null || typeof value !== "object") return value;
-  if (seen.has(value)) return seen.get(value);
-  if (Array.isArray(value)) {
-    const copy: unknown[] = [];
-    seen.set(value, copy);
-    for (let i = 0; i < value.length; i += 1) {
-      copy[i] = deepClonePlain(value[i], seen);
-    }
-    return copy;
-  }
-  const copy: Record<string, unknown> = {};
-  seen.set(value, copy);
-  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-    copy[k] = deepClonePlain(v, seen);
-  }
-  return copy;
-}
-
-function cloneDataPayload(data: Record<string, unknown>): Record<string, unknown> {
-  return deepClonePlain(data) as Record<string, unknown>;
 }
 
 function canonicalizeEventEnvelope(
@@ -1106,7 +513,7 @@ function canonicalizeEventEnvelope(
       typeof timestamp !== "number" || !Number.isFinite(timestamp) ||
       !data || typeof data !== "object" || Array.isArray(data)
     ) throw new TypeError("envelope");
-    return { eventType, timestamp, data: cloneDataPayload(data as Record<string, unknown>) };
+    return { eventType, timestamp, data: data as Record<string, unknown> };
   } catch (error) {
     addIssue(issues, "malformed_event", "envelope");
     addIssue(issues, "serialization_failed", error instanceof Error ? error.name : "envelope");
@@ -1141,36 +548,15 @@ export function prepareEventForReplay(
       addIssue(issues, "malformed_tool_event", "toolName");
     }
   }
-  if (options.maxToolPayloadBytes !== undefined && envelope.eventType.startsWith("tool_execution_")) {
-    data = capToolEventPayload(envelope.eventType, data, options.maxToolPayloadBytes, issues);
+
+  if (envelope.eventType === "tool_execution_end" && Object.hasOwn(data, "result")) {
+    data.result = truncateReplayText(data.result, options.maxTextBytes, issues);
   }
 
-  const textCap = options.maxTextBytes ?? DEFAULT_MAX_REPLAY_TEXT_BYTES;
-  if (options.maxToolPayloadBytes === undefined && envelope.eventType === "tool_execution_end" && Object.hasOwn(data, "result")) {
-    if (typeof data.result === "string") {
-      if (data.result !== "{}" && data.result !== "[]") {
-        data.result = truncateReplayText(data.result, textCap, issues);
-      }
-    } else if (data.result && typeof data.result === "object") {
-      if (Array.isArray(data.result)) {
-        if (data.result.length > 0) {
-          data.result = truncateReplayText(data.result, textCap, issues);
-        }
-      } else if (Object.keys(data.result as object).length > 0) {
-        data.result = truncateReplayText(data.result, textCap, issues);
-      }
-    }
-  }
-  if (options.maxToolPayloadBytes === undefined && envelope.eventType === "tool_execution_update" && Object.hasOwn(data, "partialResult")) {
-    if (typeof data.partialResult === "string") {
-      data.partialResult = truncateReplayText(data.partialResult, textCap, issues);
-    }
-  }
   const preparedEvent = boundEventBytes(
     { ...envelope, data },
     options.maxEventBytes ?? MAX_REPLAY_EVENT_BYTES,
     issues,
-    options.maxToolPayloadBytes,
   );
   const hashes = new Set<string>();
   collectAssetHashes(preparedEvent, hashes, issues);
