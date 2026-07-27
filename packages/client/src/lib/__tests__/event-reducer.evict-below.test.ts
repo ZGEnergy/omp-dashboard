@@ -197,3 +197,68 @@ describe("evictBelow (two-tier prune)", () => {
     });
   });
 });
+
+// --- Degradation ladder stub rung (change: hydration-tool-stub-projection) ---
+
+describe("evictBelow stub rung", () => {
+  const bigRow = (seq: number, bytes: number): ChatMessage => ({
+    ...toolRow(seq),
+    result: "y".repeat(bytes),
+    startedAt: 1,
+    duration: 25,
+  });
+
+  const stateWithToolRows = () =>
+    withState({
+      messages: [
+        { id: "u1", role: "user", content: "go", timestamp: 1, seq: 1 },
+        bigRow(2, 50_000),
+        bigRow(5, 50_000),
+      ],
+    });
+
+  it("degrades a tool row between the stub floor and the tool floor instead of dropping it", () => {
+    const out = evictBelow(stateWithToolRows(), { chatFloorSeq: 0, toolFloorSeq: 10 }, { stubFloorSeq: 2 });
+    const rows = out.messages.filter((m) => m.role === "toolResult");
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.toolStub?.detailLevel).toBe("metadata");
+      expect(row.result).toBeUndefined();
+      expect(row.toolStub!.fullBytes).toBe(50_000);
+    }
+    expect(out.evictedToolBursts).toHaveLength(0);
+  });
+
+  it("keeps the degraded row at its original seq, so position never moves", () => {
+    const out = evictBelow(stateWithToolRows(), { chatFloorSeq: 0, toolFloorSeq: 10 }, { stubFloorSeq: 2 });
+    expect(out.messages.map((m) => m.seq)).toEqual([1, 2, 5]);
+  });
+
+  it("still collapses rows below the stub floor into EvictedToolBurst markers", () => {
+    const out = evictBelow(stateWithToolRows(), { chatFloorSeq: 0, toolFloorSeq: 10 }, { stubFloorSeq: 6 });
+    expect(out.messages.filter((m) => m.role === "toolResult")).toHaveLength(0);
+    expect(out.evictedToolBursts.length).toBeGreaterThan(0);
+  });
+
+  it("never degrades a running tool row", () => {
+    const state = stateWithToolRows();
+    state.messages[1] = { ...state.messages[1]!, toolStatus: "running" };
+    const out = evictBelow(state, { chatFloorSeq: 0, toolFloorSeq: 10 }, { stubFloorSeq: 2 });
+    const running = out.messages.find((m) => m.toolCallId === "t2")!;
+    expect(running.toolStub).toBeUndefined();
+    expect(running.result).toBe("y".repeat(50_000));
+  });
+
+  it("is idempotent — re-degrading an existing metadata stub is a no-op", () => {
+    const once = evictBelow(stateWithToolRows(), { chatFloorSeq: 0, toolFloorSeq: 10 }, { stubFloorSeq: 2 });
+    const twice = evictBelow(once, { chatFloorSeq: 0, toolFloorSeq: 10 }, { stubFloorSeq: 2 });
+    expect(JSON.stringify(twice.messages)).toEqual(JSON.stringify(once.messages));
+    expect(twice.messages.find((m) => m.toolCallId === "t2")!.toolStub!.fullBytes).toBe(50_000);
+  });
+
+  it("is a no-op on tool rows when stubFloorSeq is omitted (existing behavior preserved)", () => {
+    const out = evictBelow(stateWithToolRows(), { chatFloorSeq: 0, toolFloorSeq: 3 });
+    expect(out.messages.filter((m) => m.role === "toolResult").map((m) => m.toolCallId)).toEqual(["t5"]);
+    expect(out.evictedToolBursts).toEqual([{ fromSeq: 2, toSeq: 2, count: 1 }]);
+  });
+});
