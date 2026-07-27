@@ -26,6 +26,7 @@ Files in this directory. One row per source file.
 | `editor-pane-state.ts` | Per-session pane state + localStorage persistence under `pi-dashboard:editor-pane:<sessionId>`. → see `editor-pane-state.ts.AGENTS.md` |
 | `event-reducer.ts` | `ChatMessage` gains `view?: ViewTarget` field. View rows produced by server-side `ViewMessageStore` are… → see `event-reducer.ts.AGENTS.md` |
 | `extract-urls.ts` | Pure `extractRecentUrls(messages: ChatMessage[]): string[]`. → see `extract-urls.ts.AGENTS.md` |
+| `tool-payload-cache.ts` | LRU for `fetch_tool_payload` responses, keyed by `toolCallId`. Exports `ToolPayloadCache`, `CachedPayload`, `TOOL_PAYLOAD_CACHE_BYTES` (4 MiB). Never enters replay ledger — derived state, droppable. See change: hydration-tool-stub-projection. |
 | `tree-visible.ts` | `useTreeVisible(sessionId)` + load/save. Persists editor-pane rail show/hide boolean under… → see `tree-visible.ts.AGENTS.md` |
 | `live-server-api.ts` | Client helper for live-server REST. `listLiveServers()`, `startLiveServer({host,port,label})` (pre-validates… → see `live-server-api.ts.AGENTS.md` |
 | `file-icon.ts` | `fileIcon(pathOrName)` → `{ iconPath, colorClass }`. Extension-keyed `@mdi/js` glyph + accent color for… → see `file-icon.ts.AGENTS.md` |
