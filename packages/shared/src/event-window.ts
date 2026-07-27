@@ -1,4 +1,5 @@
 import { prepareEventForReplay, utf8ByteLength, type PrepareEventForReplayOptions } from "./prepare-event-for-replay.js";
+import { makeToolStub, stubbedToolEndEvent, type ToolCallStub } from "./replay-projection.js";
 import type { DashboardEvent } from "./types.js";
 
 /** Default wire/IDB tail budget (~1.5 MiB). */
@@ -31,6 +32,131 @@ export interface EventWindowResult<T> {
   bytes: number;
   /** True when the supplied source is not strictly ascending and contiguous. */
   sourceMalformed?: true;
+}
+
+/**
+ * Fraction of the tail budget tool payloads may occupy. The remainder is a
+ * reserved chat floor that tool content cannot take.
+ *
+ * This is the direct fix for issue #101, where one subagent burst consumed the
+ * whole budget and left a transcript with no readable chat. A per-call cap
+ * alone does not bound N calls x cap; only a hard aggregate ceiling does.
+ * See change: hydration-tool-stub-projection.
+ */
+export const TOOL_CEILING_FRACTION = 0.25;
+
+export interface ToolBudgetResult {
+  events: SeqEvent<DashboardEvent>[];
+  toolBytes: number;
+  chatBytes: number;
+  /** Count of logical calls degraded below `full`. */
+  degraded: number;
+  /** Count of logical calls reduced to `metadata`. */
+  collapsed: number;
+}
+
+const TOOL_EVENT_TYPES = new Set(["tool_execution_start", "tool_execution_update", "tool_execution_end"]);
+
+function toolCallIdOf(event: DashboardEvent): string | undefined {
+  const id = (event.data as Record<string, unknown> | undefined)?.toolCallId;
+  return typeof id === "string" && id.length > 0 ? id : undefined;
+}
+
+function resultTextOf(event: DashboardEvent): string {
+  const result = (event.data as Record<string, unknown> | undefined)?.result;
+  if (typeof result === "string") return result;
+  if (result === undefined || result === null) return "";
+  try {
+    return JSON.stringify(result) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Enforce the tool ceiling / chat floor over a contiguous ascending range.
+ *
+ * Degrades logical tool calls down the ladder (`full` -> `sliced` ->
+ * `metadata`) OLDEST-FIRST, so recent calls keep the most detail, until tool
+ * bytes fit under `budgetBytes * TOOL_CEILING_FRACTION`.
+ *
+ * Blanks nothing and removes nothing: the returned seq set is identical to the
+ * input's. Only `tool_execution_end` payloads change, and each becomes a
+ * self-describing `ToolCallStub` re-fetchable by `toolCallId`. Chat events are
+ * never touched — the chat floor is enforced by construction, not by trimming.
+ *
+ * A tool with no `tool_execution_end` in the range is still running and is
+ * never degraded. Pure: the input array and its events are never mutated.
+ */
+export function applyToolBudget(
+  events: readonly SeqEvent<DashboardEvent>[],
+  budgetBytes: number,
+): ToolBudgetResult {
+  const ceiling = Math.floor(budgetBytes * TOOL_CEILING_FRACTION);
+  const out = events.slice();
+
+  // Index the terminal event of every logical call, ordered by its ANCHOR (the
+  // start seq), so "oldest-first" means oldest by transcript position.
+  const ends: Array<{ index: number; toolCallId: string; startSeq: number }> = [];
+  const startSeqById = new Map<string, number>();
+  for (let index = 0; index < out.length; index += 1) {
+    const entry = out[index]!;
+    const toolCallId = toolCallIdOf(entry.event);
+    if (!toolCallId) continue;
+    if (entry.event.eventType === "tool_execution_start" && !startSeqById.has(toolCallId)) {
+      startSeqById.set(toolCallId, entry.seq);
+    }
+    if (entry.event.eventType === "tool_execution_end") {
+      ends.push({ index, toolCallId, startSeq: startSeqById.get(toolCallId) ?? entry.seq });
+    }
+  }
+  ends.sort((a, b) => a.startSeq - b.startSeq);
+
+  // Byte totals are tracked INCREMENTALLY. Recomputing them inside the
+  // degradation loop would re-serialize the whole range once per call — O(n^2)
+  // over multi-hundred-KB payloads, which timed out at 500 calls.
+  let toolBytes = 0;
+  let chatBytes = 0;
+  for (const entry of out) {
+    const size = estimateSeqEventBytes(entry);
+    if (TOOL_EVENT_TYPES.has(entry.event.eventType)) toolBytes += size;
+    else chatBytes += size;
+  }
+
+  let degraded = 0;
+  let collapsed = 0;
+  // Two passes, oldest-first. Pass 1 slices; pass 2 collapses to metadata only
+  // where slicing alone left tool bytes above the ceiling.
+  for (const level of ["sliced", "metadata"] as const) {
+    for (const end of ends) {
+      if (toolBytes <= ceiling) break;
+      const entry = out[end.index]!;
+      const data = entry.event.data as Record<string, unknown> | undefined;
+      const existing = data?.toolStub as ToolCallStub | undefined;
+      if (existing?.detailLevel === level) continue;
+      const raw = existing ? `${existing.head ?? ""}${existing.tail ?? ""}` : resultTextOf(entry.event);
+      // `raw` is already a slice once a stub exists; keep the ORIGINAL full size
+      // so the UI reports the true unloaded byte count, not the sliced one.
+      const fullBytes = existing ? existing.fullBytes : raw.length;
+      const stub = makeToolStub({
+        toolCallId: end.toolCallId,
+        toolName: typeof data?.toolName === "string" ? data.toolName : (existing?.toolName ?? "unknown"),
+        args: data?.args as Record<string, unknown> | undefined,
+        result: raw,
+        status: data?.isError === true ? "error" : "ok",
+        startedAt: typeof data?.startedAt === "number" ? data.startedAt : entry.event.timestamp,
+        detailLevel: level,
+      });
+      stub.fullBytes = fullBytes;
+      const replacement = { seq: entry.seq, event: stubbedToolEndEvent(entry.event, stub) };
+      toolBytes += estimateSeqEventBytes(replacement) - estimateSeqEventBytes(entry);
+      out[end.index] = replacement;
+      if (!existing) degraded += 1;
+      if (level === "metadata") collapsed += 1;
+    }
+  }
+
+  return { events: out, toolBytes, chatBytes, degraded, collapsed };
 }
 
 /** Clamp a requested budget into the allowed range. Non-finite / missing → default. */

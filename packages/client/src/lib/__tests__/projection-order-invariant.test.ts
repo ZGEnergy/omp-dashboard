@@ -1,4 +1,5 @@
 import type { SeqEvent } from "@blackbelt-technology/pi-dashboard-shared/event-window.js";
+import { applyToolBudget } from "@blackbelt-technology/pi-dashboard-shared/event-window.js";
 import { coalesceProjection } from "@blackbelt-technology/pi-dashboard-shared/replay-projection.js";
 import { ALL_SCENARIOS, generateSession } from "@blackbelt-technology/pi-dashboard-shared/test-support/generate-session.js";
 import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
@@ -94,6 +95,18 @@ describe("coalesceProjection satisfies the invariant", () => {
       for (let seed = 1; seed <= 25; seed += 1) {
         const raw = generateSession(scenario, seed);
         assertOrderInvariant(raw, coalesceProjection(raw), `${scenario}#${seed}`);
+      }
+    }
+  });
+});
+
+describe("applyToolBudget satisfies the invariant", () => {
+  it("preserves rendered order and roles at every budget, for every scenario", () => {
+    for (const scenario of ALL_SCENARIOS) {
+      const raw = generateSession(scenario, 42);
+      for (const budget of [1.5 * 1024 * 1024, 512 * 1024, 128 * 1024, 32 * 1024, 16 * 1024]) {
+        const projected = applyToolBudget(coalesceProjection(raw), budget).events;
+        assertOrderInvariant(raw, projected, `${scenario}@${budget}`);
       }
     }
   });
