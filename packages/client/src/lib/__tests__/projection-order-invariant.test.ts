@@ -1,4 +1,5 @@
 import type { SeqEvent } from "@blackbelt-technology/pi-dashboard-shared/event-window.js";
+import { coalesceProjection } from "@blackbelt-technology/pi-dashboard-shared/replay-projection.js";
 import { ALL_SCENARIOS, generateSession } from "@blackbelt-technology/pi-dashboard-shared/test-support/generate-session.js";
 import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { describe, expect, it } from "vitest";
@@ -77,5 +78,23 @@ describe("projection order invariant", () => {
     expect(rawShape.indexOf("assistant")).toBeLessThan(rawShape.indexOf("toolResult"));
     expect(brokenShape.indexOf("assistant")).toBeGreaterThan(brokenShape.indexOf("toolResult"));
     expect(() => assertOrderInvariant(raw, broken, "#102")).toThrow();
+  });
+});
+
+describe("coalesceProjection satisfies the invariant", () => {
+  it("preserves rendered order and roles for every scenario", () => {
+    for (const scenario of ALL_SCENARIOS) {
+      const raw = generateSession(scenario, 42);
+      assertOrderInvariant(raw, coalesceProjection(raw), scenario);
+    }
+  });
+
+  it("preserves the invariant across many seeds", () => {
+    for (const scenario of ALL_SCENARIOS) {
+      for (let seed = 1; seed <= 25; seed += 1) {
+        const raw = generateSession(scenario, seed);
+        assertOrderInvariant(raw, coalesceProjection(raw), `${scenario}#${seed}`);
+      }
+    }
   });
 });
