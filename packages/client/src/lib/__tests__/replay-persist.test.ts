@@ -1,3 +1,4 @@
+import { isCoverageContiguous } from "@blackbelt-technology/pi-dashboard-shared/replay-projection.js";
 import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { IDBFactory } from "fake-indexeddb";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -58,15 +59,20 @@ it("drop clears the buffer and deletes the persisted entry", async () => {
   await p.flush("s1");
   expect(await cache.get("s1")).toBeNull();
 });
-
   it("bounds the live in-memory buffer before flushing", () => {
     const cache = createReplayCache({ factory });
-    const maxRetainedBytes = JSON.stringify(evt(1)).length * 2;
+    const evt3 = evt(3);
+    const evt5 = evt(5);
+    const range4 = [{ fromSeq: 4, toSeq: 4 }];
+    const bytesEvt3 = new TextEncoder().encode(JSON.stringify(evt3)).byteLength;
+    const bytesEvt5 = new TextEncoder().encode(JSON.stringify(evt5)).byteLength;
+    const bytesRange4 = new TextEncoder().encode(JSON.stringify(range4)).byteLength;
+    const maxRetainedBytes = bytesEvt3 + bytesEvt5 + bytesRange4;
     const p = createReplayPersister(cache, 1_000, undefined, maxRetainedBytes);
 
-    p.record("s1", [evt(1), evt(2), evt(3), evt(4)]);
+    p.record("s1", [evt(1), evt(3), evt(5)]);
 
-    expect(p.snapshot("s1").map((event) => event.seq)).toEqual([3, 4]);
+    expect(p.snapshot("s1").map((event) => event.seq)).toEqual([3, 5]);
     p.dispose();
   });
 });
@@ -180,5 +186,76 @@ describe("replay-persist — scoped + dispose", () => {
     expect(retained).toBe(expected);
     p.dispose();
     expect(p.bytes("s1")).toBe(0); // disposed
+  });
+
+  it("clips retained ranges to exact suffix and maintains contiguous rehydration coverage when trimmed", async () => {
+    const cache = createReplayCache({ factory });
+    const scope = { serverEpoch: "server-trim", sourceGeneration: "gen-trim" };
+    // Small retention ceiling so seeding exact 1, 3, 5 overflows
+    // and forces prefix (seq 1) to be trimmed from the retained buffer payload.
+    const maxBytes =
+      new TextEncoder().encode(JSON.stringify(evt(3))).byteLength +
+      new TextEncoder().encode(JSON.stringify(evt(5))).byteLength +
+      new TextEncoder().encode(
+        JSON.stringify([
+          { fromSeq: 2, toSeq: 2 },
+          { fromSeq: 4, toSeq: 4 },
+        ]),
+      ).byteLength;
+    const persister = createReplayPersister(cache, 1000, scope, maxBytes);
+
+    const exactEvents = [evt(1), evt(3), evt(5)];
+    const skippedSeqRanges = [
+      { fromSeq: 2, toSeq: 2 },
+      { fromSeq: 4, toSeq: 4 },
+    ];
+
+    persister.seed("s-trim", exactEvents, skippedSeqRanges);
+    await persister.flush("s-trim");
+
+    const hit = await cache.getScoped(scope, "s-trim");
+    expect(hit).not.toBeNull();
+
+    // Suffix trimming dropped seq 1, retaining exact 3 and 5.
+    const retainedSeqList = hit!.payload.map((e) => e.seq);
+    expect(retainedSeqList).toEqual([3, 5]);
+
+    // Range 2..2 is retained as the leading range for exact 3; range 4..4 is kept intact.
+    expect(hit!.skippedSeqRanges).toEqual([
+      { fromSeq: 2, toSeq: 2 },
+      { fromSeq: 4, toSeq: 4 },
+    ]);
+
+    // Rehydration coverage over the retained window [minSeq..maxSeq] must be contiguous.
+    const minSeq = hit!.minSeq!;
+    const maxSeq = hit!.maxSeq!;
+    expect(minSeq).toBe(2);
+    expect(maxSeq).toBe(5);
+    expect(isCoverageContiguous(hit!.payload, hit!.skippedSeqRanges ?? [], minSeq, maxSeq)).toBe(true);
+  });
+
+  it("preserves leading skipped range when exact1 is evicted, leaving exact4 and range2..3 with minSeq 2", async () => {
+    const cache = createReplayCache({ factory });
+    const scope = { serverEpoch: "server-lead", sourceGeneration: "gen-lead" };
+
+    const exactEvents = [evt(1), evt(4)];
+    const skippedSeqRanges = [{ fromSeq: 2, toSeq: 3 }];
+
+    // Budget fits evt(4) and range 2..3, but not evt(1)
+    const maxBytes =
+      new TextEncoder().encode(JSON.stringify(evt(4))).byteLength +
+      new TextEncoder().encode(JSON.stringify(skippedSeqRanges)).byteLength;
+
+    const persister = createReplayPersister(cache, 1000, scope, maxBytes);
+    persister.seed("s-lead", exactEvents, skippedSeqRanges);
+    await persister.flush("s-lead");
+
+    const hit = await cache.getScoped(scope, "s-lead");
+    expect(hit).not.toBeNull();
+    expect(hit!.payload.map((e) => e.seq)).toEqual([4]);
+    expect(hit!.skippedSeqRanges).toEqual([{ fromSeq: 2, toSeq: 3 }]);
+    expect(hit!.minSeq).toBe(2);
+    expect(hit!.maxSeq).toBe(4);
+    expect(isCoverageContiguous(hit!.payload, hit!.skippedSeqRanges ?? [], hit!.minSeq!, hit!.maxSeq!)).toBe(true);
   });
 });

@@ -1,8 +1,15 @@
 import type {
   EventReplayMessage,
   ReplayKind,
+  SkippedSeqRange,
 } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
 import { estimateSeqEventBytes } from "@blackbelt-technology/pi-dashboard-shared/event-window.js";
+import {
+  clipSkippedSeqRanges,
+  computeLogicalSeqBounds,
+  normalizeSkippedSeqRanges,
+  retainSkippedSeqRangesForEventSuffix,
+} from "@blackbelt-technology/pi-dashboard-shared/replay-projection.js";
 import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { DEFAULT_REPLAY_RETENTION_BYTES } from "./replay-retention.js";
 
@@ -44,6 +51,10 @@ export interface SessionReplayLedgerOptions {
 const DEFAULT_MAX_GAP_EVENTS = 256;
 const DEFAULT_MAX_GAP_BYTES = 1024 * 1024;
 
+type TimelineItem =
+  | { kind: "exact"; start: number; end: number; event: LedgerEvent }
+  | { kind: "range"; start: number; end: number; range: SkippedSeqRange };
+
 /**
  * The only owner of a session's sequence range and replay request authority.
  * Reducers only consume `accepted`; a gap therefore cannot accidentally advance
@@ -51,6 +62,7 @@ const DEFAULT_MAX_GAP_BYTES = 1024 * 1024;
  */
 export class SessionReplayLedger {
   private readonly bySeq = new Map<number, LedgerEvent>();
+  private skippedRanges: SkippedSeqRange[] = [];
   private readonly gaps = new Map<number, LedgerEvent>();
   private active: ReplayRequest | null = null;
   private activeSource: string | null = null;
@@ -75,17 +87,25 @@ export class SessionReplayLedger {
   get sourceGeneration(): string | null {
     return this.activeSource;
   }
-
   get cursor(): number {
-    return this.events.at(-1)?.seq ?? 0;
+    return computeLogicalSeqBounds(this.events, this.skippedRanges).maxSeq ?? 0;
   }
 
   get minSeq(): number {
-    return this.events[0]?.seq ?? 0;
+    return computeLogicalSeqBounds(this.events, this.skippedRanges).minSeq ?? 0;
+  }
+
+  get retainedByteCount(): number {
+    const skippedBytes = this.skippedRanges.length > 0 ? JSON.stringify(this.skippedRanges).length : 0;
+    return this.retainedBytes + skippedBytes;
   }
 
   get events(): LedgerEvent[] {
     return [...this.bySeq.values()].sort((a, b) => a.seq - b.seq);
+  }
+
+  get skippedSeqRanges(): SkippedSeqRange[] {
+    return [...this.skippedRanges];
   }
 
   get request(): ReplayRequest | null {
@@ -137,11 +157,32 @@ export class SessionReplayLedger {
   }
 
   /** Seed a cache-admitted nonempty contiguous suffix before issuing its delta request. */
-  seed(sourceGeneration: string, entries: readonly LedgerEvent[]): boolean {
-    if (entries.length === 0 || !this.isStrictlyAscending(entries) || !this.isContiguous(entries)) return false;
+  seed(
+    sourceGeneration: string,
+    entries: readonly LedgerEvent[],
+    skippedRanges: readonly SkippedSeqRange[] = [],
+  ): boolean {
+    const normRanges = normalizeSkippedSeqRanges(skippedRanges);
+    if (entries.length === 0 && normRanges.length === 0) return false;
+    if (!this.isStrictlyAscending(entries)) return false;
+
+    // Build timeline items to check contiguity
+    const items: TimelineItem[] = [
+      ...entries.map((e): TimelineItem => ({ kind: "exact", start: e.seq, end: e.seq, event: e })),
+      ...normRanges.map((r): TimelineItem => ({ kind: "range", start: r.fromSeq, end: r.toSeq, range: r })),
+    ].sort((a, b) => a.start - b.start);
+
+    for (let i = 1; i < items.length; i++) {
+      if (items[i].start <= items[i - 1].end || items[i].start !== items[i - 1].end + 1) return false;
+    }
+
+    const entrySeqs = entries.map((e) => e.seq);
+    if (rangeOverlapsSeqs(normRanges, entrySeqs)) return false;
+
     this.clear(sourceGeneration);
     this.active = null;
     for (const entry of entries) this.addRetained(entry);
+    this.skippedRanges = normRanges;
     this.trimRetained();
     this.status = "ready";
     return true;
@@ -176,7 +217,7 @@ export class SessionReplayLedger {
     // correlated first frame. Adopt it only while no canonical event exists;
     // every later frame remains an exact source-generation match.
     const adoptingInitialColdSource = this.activeSource === "" && this.active.kind === "cold" &&
-      this.bySeq.size === 0 && frame.replayKind === "cold";
+      this.bySeq.size === 0 && this.skippedRanges.length === 0 && frame.replayKind === "cold";
     if (adoptingInitialColdSource) {
       this.activeSource = frame.sourceGeneration;
       this.active.sourceGeneration = frame.sourceGeneration;
@@ -185,26 +226,42 @@ export class SessionReplayLedger {
       return result;
     }
     const originalMin = this.minSeq;
-    const events = frame.events;
-    if (!this.isStrictlyAscending(events)) return this.resetResult("invalid_replay");
+    const events = frame.events ?? [];
+    const frameRanges = normalizeSkippedSeqRanges(frame.skippedSeqRanges ?? []);
 
-    if (frame.replayKind === "cold" && this.bySeq.size === 0 && events.length > 0) {
-      // A tail cold frame establishes an explicit contiguous baseline, even when
-      // retention means its first sequence is not one. Internal holes are never
-      // a valid baseline, regardless of the retained starting sequence.
-      if (!this.isContiguous(events)) return this.resetResult("invalid_replay");
-      for (const entry of events) this.addRetained(entry);
-      result.accepted = events;
+    const hasBaseline = this.bySeq.size > 0 || this.skippedRanges.length > 0;
+    if (!this.isStrictlyAscending(events)) {
+      if (!hasBaseline) return this.resetResult("invalid_replay");
+      result.stale = true;
+      return result;
+    }
+
+    // Overlap check between events and skipped ranges in this frame
+    const eventSeqs = events.map((e) => e.seq);
+    if (rangeOverlapsSeqs(frameRanges, eventSeqs)) {
+      if (!hasBaseline) return this.resetResult("invalid_replay");
+      result.stale = true;
+      return result;
+    }
+
+    if (frame.replayKind === "cold" && !hasBaseline) {
+      const outcome = this.acceptForwardFrame(events, frameRanges, result);
+      if (outcome === "conflict") return this.resetResult("conflict");
+      if (outcome === "invalid_replay") return this.resetResult("invalid_replay");
     } else if (frame.replayKind === "older") {
-      if (!this.acceptOlder(events, originalMin, result, frame.isLast)) return this.resetResult("invalid_replay");
-    } else {
-      for (const entry of events) {
-        const admission = this.acceptForward(entry);
-        if (admission === "conflict") return this.resetResult("conflict");
-        if (admission === "gap") return this.resetResult("invalid_replay");
-        if (admission === "accepted") result.accepted.push(entry);
+      if (!this.acceptOlder(events, frameRanges, originalMin, result, frame.isLast)) {
+        if (!hasBaseline) return this.resetResult("invalid_replay");
+        result.stale = true;
+        return result;
       }
-      this.drainGaps(result.accepted);
+    } else {
+      const outcome = this.acceptForwardFrame(events, frameRanges, result);
+      if (outcome === "conflict") return this.resetResult("conflict");
+      if (outcome === "invalid_replay") {
+        if (!hasBaseline) return this.resetResult("invalid_replay");
+        result.stale = true;
+        return result;
+      }
     }
 
     result.evictedHead = this.trimRetained();
@@ -230,6 +287,7 @@ export class SessionReplayLedger {
       result.stale = true;
       return result;
     }
+    if (this.isCoveredBySkipped(entry.seq)) return result;
     const admission = this.acceptForward(entry);
     if (admission === "conflict") return this.resetResult("conflict");
     if (admission === "accepted") {
@@ -250,28 +308,149 @@ export class SessionReplayLedger {
     return result;
   }
 
-  private acceptOlder(events: LedgerEvent[], originalMin: number, result: LedgerAdmission, terminal: boolean): boolean {
+  private acceptOlder(
+    events: LedgerEvent[],
+    frameRanges: SkippedSeqRange[],
+    originalMin: number,
+    result: LedgerAdmission,
+    terminal: boolean,
+  ): boolean {
     const boundary = this.active?.fromSeq ?? originalMin;
     if (boundary <= 0) return false;
-    if (events.length > 0) {
-      if (!this.isContiguous(events) || events.at(-1)!.seq >= boundary) return false;
-      if (this.olderPageLastSeq !== null && events[0]!.seq !== this.olderPageLastSeq + 1) return false;
+    const count = events.length + frameRanges.length;
+    if (count > 0) {
+      const items: TimelineItem[] = [
+        ...events.map((e): TimelineItem => ({ kind: "exact", start: e.seq, end: e.seq, event: e })),
+        ...frameRanges.map((r): TimelineItem => ({ kind: "range", start: r.fromSeq, end: r.toSeq, range: r })),
+      ].sort((a, b) => a.start - b.start);
+
+      for (let i = 1; i < items.length; i++) {
+        if (items[i].start <= items[i - 1].end || items[i].start !== items[i - 1].end + 1) return false;
+      }
+
+      const maxSeq = items[items.length - 1].end;
+      const minSeq = items[0].start;
+
+      if (maxSeq >= boundary) return false;
+      if (this.olderPageLastSeq !== null && minSeq !== this.olderPageLastSeq + 1) return false;
+
+      const eventSeqs = events.map((e) => e.seq);
+      if (rangeOverlapsSeqs(frameRanges, eventSeqs)) return false;
+
       for (const entry of events) {
+        if (this.isCoveredBySkipped(entry.seq)) return false;
         const old = this.bySeq.get(entry.seq);
         if (old && !sameEvent(old, entry)) return false;
-        if (!old) {
+      }
+
+      const retainedSeqs = this.events.map((e) => e.seq);
+      if (rangeOverlapsSeqs(frameRanges, retainedSeqs)) return false;
+      if (rangesOverlapRanges(frameRanges, this.skippedRanges)) return false;
+
+      for (const entry of events) {
+        if (!this.bySeq.has(entry.seq)) {
           this.addRetained(entry);
           result.accepted.push(entry);
         }
       }
-      this.olderPageLastSeq = events.at(-1)!.seq;
+      this.addSkippedRanges(frameRanges);
+      this.olderPageLastSeq = maxSeq;
     }
-    // Older pages arrive in ascending batches, while their terminal is often
-    // empty. Validate against the request boundary, not the mutable ledger head.
     return !terminal || this.olderPageLastSeq === boundary - 1;
   }
 
+  private acceptForwardFrame(
+    events: LedgerEvent[],
+    frameRanges: SkippedSeqRange[],
+    result: LedgerAdmission,
+  ): "accepted" | "conflict" | "invalid_replay" {
+    if (events.length === 0 && frameRanges.length === 0) return "accepted";
+
+    const eventSeqs = events.map((e) => e.seq);
+    if (rangeOverlapsSeqs(frameRanges, eventSeqs)) return "invalid_replay";
+
+    // Overlap checks against existing retained state & skipped ranges
+    const retainedSeqs = this.events.map((e) => e.seq);
+    if (rangeOverlapsSeqs(frameRanges, retainedSeqs)) return "invalid_replay";
+
+    if (rangesOverlapRanges(frameRanges, this.skippedRanges)) return "invalid_replay";
+
+    // Construct timeline items
+    const items: TimelineItem[] = [
+      ...events.map((e): TimelineItem => ({ kind: "exact", start: e.seq, end: e.seq, event: e })),
+      ...frameRanges.map((r): TimelineItem => ({ kind: "range", start: r.fromSeq, end: r.toSeq, range: r })),
+    ].sort((a, b) => a.start - b.start);
+
+    // Validate internal contiguity of frame items
+    for (let i = 1; i < items.length; i++) {
+      if (items[i].start <= items[i - 1].end || items[i].start !== items[i - 1].end + 1) return "invalid_replay";
+    }
+
+    const cursor = this.cursor;
+
+    // Check connection to current cursor
+    if (items[0].start > cursor) {
+      const connectsToCursor = cursor === 0 || items[0].start === cursor + 1 || this.gaps.has(items[0].start);
+      if (!connectsToCursor) return "invalid_replay";
+    }
+
+    // Pre-validate conflicts for exact events before state mutation
+    for (const item of items) {
+      if (item.kind === "exact") {
+        const old = this.bySeq.get(item.event.seq);
+        if (old && !sameEvent(old, item.event)) return "conflict";
+        const buffered = this.gaps.get(item.event.seq);
+        if (buffered && !sameEvent(buffered, item.event)) return "conflict";
+      }
+    }
+
+    // Apply items in ascending order
+    for (const item of items) {
+      if (item.kind === "range") {
+        for (const [seq, gapEntry] of [...this.gaps.entries()]) {
+          if (seq >= item.start && seq <= item.end) {
+            this.gaps.delete(seq);
+            this.gapBytes -= JSON.stringify(gapEntry).length;
+          }
+        }
+        if (item.end > cursor) {
+          const newRange: SkippedSeqRange = {
+            fromSeq: Math.max(item.start, cursor + 1),
+            toSeq: item.end,
+          };
+          this.addSkippedRanges([newRange]);
+        }
+      } else {
+        const entry = item.event;
+        if (this.gaps.has(entry.seq)) {
+          this.gaps.delete(entry.seq);
+          this.gapBytes -= JSON.stringify(entry).length;
+          this.addRetained(entry);
+          result.accepted.push(entry);
+        } else if (entry.seq > cursor) {
+          const admission = this.acceptForward(entry);
+          if (admission === "conflict") return "conflict";
+          if (admission === "gap") return "invalid_replay";
+          if (admission === "accepted") result.accepted.push(entry);
+        } else {
+          // entry.seq <= cursor
+          if (this.isCoveredBySkipped(entry.seq)) continue;
+          const old = this.bySeq.get(entry.seq);
+          if (old) {
+            if (!sameEvent(old, entry)) return "conflict";
+            continue;
+          }
+          return "invalid_replay";
+        }
+      }
+    }
+
+    this.drainGaps(result.accepted);
+    return "accepted";
+  }
+
   private acceptForward(entry: LedgerEvent): "accepted" | "duplicate" | "conflict" | "gap" {
+    if (this.isCoveredBySkipped(entry.seq)) return "duplicate";
     const old = this.bySeq.get(entry.seq);
     if (old) return sameEvent(old, entry) ? "duplicate" : "conflict";
     const buffered = this.gaps.get(entry.seq);
@@ -282,6 +461,24 @@ export class SessionReplayLedger {
       return "accepted";
     }
     return "gap";
+  }
+
+  private isCoveredBySkipped(seq: number): boolean {
+    let low = 0;
+    let high = this.skippedRanges.length - 1;
+    while (low <= high) {
+      const mid = (low + high) >> 1;
+      const r = this.skippedRanges[mid]!;
+      if (seq >= r.fromSeq && seq <= r.toSeq) return true;
+      if (seq < r.fromSeq) high = mid - 1;
+      else low = mid + 1;
+    }
+    return false;
+  }
+
+  private addSkippedRanges(ranges: readonly SkippedSeqRange[]): void {
+    if (ranges.length === 0) return;
+    this.skippedRanges = normalizeSkippedSeqRanges([...this.skippedRanges, ...ranges]);
   }
 
   private drainGaps(accepted: LedgerEvent[]): void {
@@ -303,7 +500,7 @@ export class SessionReplayLedger {
 
   private trimRetained(): boolean {
     let evicted = false;
-    while (this.bySeq.size > 1 && this.retainedBytes > this.maxRetainedBytes) {
+    while (this.bySeq.size > 1 && this.retainedByteCount > this.maxRetainedBytes) {
       let oldestSeq = Number.POSITIVE_INFINITY;
       for (const seq of this.bySeq.keys()) oldestSeq = Math.min(oldestSeq, seq);
       const oldest = this.bySeq.get(oldestSeq);
@@ -311,10 +508,13 @@ export class SessionReplayLedger {
       this.bySeq.delete(oldestSeq);
       this.retainedBytes -= estimateSeqEventBytes(oldest);
       evicted = true;
+      this.skippedRanges = retainSkippedSeqRangesForEventSuffix(this.events, this.skippedRanges);
+    }
+    if (evicted) {
+      this.skippedRanges = retainSkippedSeqRangesForEventSuffix(this.events, this.skippedRanges);
     }
     return evicted;
   }
-
   private isStrictlyAscending(events: readonly LedgerEvent[]): boolean {
     for (let index = 1; index < events.length; index++) {
       if (events[index - 1]!.seq >= events[index]!.seq) return false;
@@ -322,15 +522,9 @@ export class SessionReplayLedger {
     return true;
   }
 
-  private isContiguous(events: readonly LedgerEvent[]): boolean {
-    for (let index = 1; index < events.length; index++) {
-      if (events[index]!.seq !== events[index - 1]!.seq + 1) return false;
-    }
-    return true;
-  }
-
   private clear(sourceGeneration: string, clearFailures = true): void {
     this.bySeq.clear();
+    this.skippedRanges = [];
     this.gaps.clear();
     this.gapBytes = 0;
     this.retainedBytes = 0;
@@ -354,10 +548,8 @@ export class SessionReplayLedger {
   }
 
   private resetResult(reason: LedgerResetReason): LedgerAdmission {
-    // A protocol fault invalidates the whole provisional baseline. Recovery must
-    // rebuild canonical state from a fresh cold tail; preserving the prefix here
-    // lets stale frames cross the fault after the controller resets the reducer.
     this.bySeq.clear();
+    this.skippedRanges = [];
     this.gaps.clear();
     this.gapBytes = 0;
     this.retainedBytes = 0;
@@ -380,4 +572,41 @@ export class SessionReplayLedger {
 
 function sameEvent(a: LedgerEvent, b: LedgerEvent): boolean {
   return JSON.stringify(a.event) === JSON.stringify(b.event);
+}
+
+function rangeOverlapsSeqs(ranges: readonly SkippedSeqRange[], sortedSeqs: readonly number[]): boolean {
+  if (ranges.length === 0 || sortedSeqs.length === 0) return false;
+  for (const r of ranges) {
+    let low = 0;
+    let high = sortedSeqs.length - 1;
+    let idx = sortedSeqs.length;
+    while (low <= high) {
+      const mid = (low + high) >> 1;
+      if (sortedSeqs[mid]! >= r.fromSeq) {
+        idx = mid;
+        high = mid - 1;
+      } else {
+        low = mid + 1;
+      }
+    }
+    if (idx < sortedSeqs.length && sortedSeqs[idx]! <= r.toSeq) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function rangesOverlapRanges(rangesA: readonly SkippedSeqRange[], rangesB: readonly SkippedSeqRange[]): boolean {
+  let i = 0;
+  let j = 0;
+  while (i < rangesA.length && j < rangesB.length) {
+    const a = rangesA[i]!;
+    const b = rangesB[j]!;
+    if (Math.max(a.fromSeq, b.fromSeq) <= Math.min(a.toSeq, b.toSeq)) {
+      return true;
+    }
+    if (a.toSeq < b.toSeq) i++;
+    else j++;
+  }
+  return false;
 }
