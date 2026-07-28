@@ -9,6 +9,7 @@
 // @blackbelt-technology/dashboard-plugin-runtime to derive their own
 // state; useMessageHandler.ts mirrors every msg.event into the
 // per-session-events store the plugin runtime owns.
+import { makeToolStub, type ToolCallStub } from "@blackbelt-technology/pi-dashboard-shared/replay-projection.js";
 import { parseSkillBlock, type SkillBlock } from "@blackbelt-technology/pi-dashboard-shared/skill-block-parser.js";
 import type { DashboardEvent, ViewTarget } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 
@@ -28,6 +29,14 @@ export interface ChatMessage {
   timestamp: number;
   args?: Record<string, unknown>;
   result?: string;
+  /**
+   * Set when this tool row's payload has been degraded to a stub — by server
+   * hydration (the wire event carried `data.toolStub`) or by client eviction.
+   * Mutually exclusive with `result`: whichever is present is what renders.
+   * Re-inflate on demand via `fetch_tool_payload` keyed by `toolCallId`.
+   * See change: hydration-tool-stub-projection.
+   */
+  toolStub?: ToolCallStub;
   toolStatus?: "running" | "complete" | "error";
   /** Epoch ms when the block started (for live elapsed counter) */
   startedAt?: number;
@@ -393,7 +402,15 @@ function readSubagentDetails(
   return out;
 }
 
-function warnMalformedToolEvent(eventType: string): void {
+function warnMalformedToolEvent(eventType: string, data: Record<string, unknown> | undefined): void {
+  // A tool event BLANKED by the replay projection legitimately arrives with an
+  // empty `data` — it exists only to hold its seq so the range stays
+  // contiguous. That is expected, not malformed, and a tool-heavy hydration
+  // blanks hundreds of progress updates; warning on each would flood the
+  // console. Only a genuinely malformed event (non-empty data, absent
+  // toolCallId) is worth reporting.
+  // See change: hydration-tool-stub-projection.
+  if (data && Object.keys(data).length === 0) return;
   console.warn(`[event-reducer] ${eventType} ignored: missing non-empty toolCallId`);
 }
 
@@ -519,6 +536,7 @@ const TOOL_TIER_ROLES: ReadonlySet<ChatMessage["role"]> = new Set(["toolResult",
 export function evictBelow(
   state: SessionState,
   floors: { chatFloorSeq: number; toolFloorSeq: number },
+  options: { stubFloorSeq?: number } = {},
 ): SessionState {
   const protectedTool = (t: ToolCallState) => t.status === "running";
   const toolCalls = new Map(state.toolCalls);
@@ -529,19 +547,42 @@ export function evictBelow(
   }
   const streamingIds = new Set(state.messages.filter((m) => m.isStreaming).map((m) => m.id));
   const evictedToolRowSeqs: number[] = [];
-  const messages = state.messages.filter((m) => {
-    if (streamingIds.has(m.id) || typeof m.seq !== "number") return true;
+  // The degradation ladder's middle rungs. A tool row at or above
+  // `stubFloorSeq` keeps its position and identity but sheds its payload,
+  // becoming a `metadata` stub re-fetchable by `toolCallId`. Only BELOW the
+  // stub floor does a row collapse into an `EvictedToolBurst` marker — the
+  // ladder's bottom rung. Omitting `stubFloorSeq` reproduces the previous
+  // drop-only behavior exactly. See change: hydration-tool-stub-projection.
+  const stubFloor = options.stubFloorSeq;
+  const messages = state.messages.flatMap((m) => {
+    if (streamingIds.has(m.id) || typeof m.seq !== "number") return [m];
     if (TOOL_TIER_ROLES.has(m.role)) {
       // A row still tied to a running tool must survive even below the tool
       // floor — mirrors the `protectedTool` guard on the toolCalls map above.
-      if (m.toolStatus === "running") return true;
-      if (m.seq < floors.toolFloorSeq) {
-        evictedToolRowSeqs.push(m.seq);
-        return false;
+      if (m.toolStatus === "running") return [m];
+      if (m.seq >= floors.toolFloorSeq) return [m];
+      if (stubFloor !== undefined && m.seq >= stubFloor) {
+        if (m.toolStub?.detailLevel === "metadata") return [m];
+        const stub = makeToolStub({
+          toolCallId: m.toolCallId ?? m.id,
+          toolName: m.toolName ?? "unknown",
+          args: m.args,
+          result: m.result ?? "",
+          status: m.toolStatus === "error" ? "error" : "ok",
+          startedAt: m.startedAt ?? m.timestamp,
+          ...(m.duration !== undefined ? { durationMs: m.duration } : {}),
+          detailLevel: "metadata",
+        });
+        // Keep the ORIGINAL unloaded size when re-degrading an existing stub,
+        // so the row keeps reporting the true byte count.
+        stub.fullBytes = m.toolStub?.fullBytes ?? (m.result?.length ?? 0);
+        const { result: _dropped, ...rest } = m;
+        return [{ ...rest, toolStub: stub }];
       }
-      return true;
+      evictedToolRowSeqs.push(m.seq);
+      return [];
     }
-    return m.seq >= floors.chatFloorSeq;
+    return m.seq >= floors.chatFloorSeq ? [m] : [];
   });
   // Unresolved interactive requests are never dropped (also true of the
   // streaming-message keep above). Subagents are intentionally left
@@ -1902,7 +1943,7 @@ export function reduceEvent(
     case "tool_execution_update": {
       const toolCallId = data.toolCallId;
       if (typeof toolCallId !== "string" || toolCallId.length === 0) {
-        warnMalformedToolEvent("tool_execution_update");
+        warnMalformedToolEvent("tool_execution_update", data);
         break;
       }
       const existingTool = next.toolCalls.get(toolCallId);
@@ -1987,7 +2028,7 @@ export function reduceEvent(
     case "tool_execution_end": {
       const toolCallId = data.toolCallId;
       if (typeof toolCallId !== "string" || toolCallId.length === 0) {
-        warnMalformedToolEvent("tool_execution_end");
+        warnMalformedToolEvent("tool_execution_end", data);
         break;
       }
       const healedBy = data.healedBy as string | undefined;
@@ -2007,6 +2048,11 @@ export function reduceEvent(
       const args = existing?.args ?? existingMessage?.args ?? (data.args as Record<string, unknown> | undefined);
       const startedAt = existing?.startedAt ?? existingMessage?.startedAt ?? (typeof data.startedAt === "number" ? data.startedAt : undefined);
       const result = data.result !== undefined ? toDisplayString(data.result) : undefined;
+      // Hydration may deliver a stub instead of a payload. It sits at the same
+      // seq with the same eventType, so the row is created/finalized in exactly
+      // the position a full payload would have produced.
+      // See change: hydration-tool-stub-projection.
+      const toolStub = data.toolStub as ToolCallStub | undefined;
       next.toolCalls.set(toolCallId, {
         ...(existing ?? { toolCallId, toolName, args }),
         toolCallId,
@@ -2042,6 +2088,7 @@ export function reduceEvent(
           args,
           toolStatus: isError ? "error" : "complete",
           ...(result !== undefined ? { result: truncateOutputForDisplay(result) } : {}),
+          ...(toolStub ? { toolStub } : {}),
           ...(startedAt !== undefined ? { duration: event.timestamp - startedAt } : {}),
           ...(images ? { images } : {}),
           ...(finalDetails ? { toolDetails: finalDetails } : {}),
@@ -2059,6 +2106,7 @@ export function reduceEvent(
           timestamp: event.timestamp,
           ...(startedAt !== undefined ? { startedAt, duration: event.timestamp - startedAt } : {}),
           ...(result !== undefined ? { result: truncateOutputForDisplay(result) } : {}),
+          ...(toolStub ? { toolStub } : {}),
           ...(images ? { images } : {}),
           ...(finalDetails ? { toolDetails: finalDetails } : {}),
           seq,

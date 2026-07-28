@@ -162,7 +162,19 @@ describe("replay coordinator", () => {
 
     const delivered = ws.frames.filter((frame: any) => frame.type === "event_replay").flatMap((frame: any) => frame.events);
     expect(delivered[0]?.seq).toBe(1);
-    expect(delivered.filter((entry: any) => entry.event.eventType === "message_end").slice(0, -1).every((entry: any) => Object.keys(entry.event.data).length === 0)).toBe(true);
+    // The duplicated 6 KB tool args must be gone — that is what this test is
+    // about. The message ENVELOPE is deliberately retained: fully blanking an
+    // assistant `message_end` drops `message.role`, which suppresses the
+    // reducer's `turnSeparator` row and the `streamingTextFlushed` reset. That
+    // is a rendered-output change, caught by the `tool-only-shell` scenario in
+    // the order-invariant property test. See change: hydration-tool-stub-projection.
+    const shells = delivered
+      .filter((entry: any) => entry.event.eventType === "message_end")
+      .slice(0, -1);
+    expect(shells.length).toBeGreaterThan(0);
+    expect(shells.every((entry: any) => entry.event.data.message.content.length === 0)).toBe(true);
+    expect(shells.every((entry: any) => entry.event.data.message.role === "assistant")).toBe(true);
+    expect(JSON.stringify(shells).includes("x".repeat(1024))).toBe(false);
     expect(delivered.at(-1)?.event).toMatchObject({ eventType: "message_end", data: { message: { content: [{ text: "final answer" }] } } });
   });
 

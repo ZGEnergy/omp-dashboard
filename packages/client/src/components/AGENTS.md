@@ -7,6 +7,7 @@ Files in this directory. One row per source file.
 | `ActionButton.tsx` | `<ActionButton action options pendingLabel>` thin wrapper over `useAsyncAction.bind`. → see `ActionButton.tsx.AGENTS.md` |
 | `AddToWorkspaceMenu.tsx` | Popover menu listing workspaces plus `+ New workspace…` entry. Surfaced on folder action bar. Exports `AddToWorkspaceMenu`. Closes on outside click / Escape. |
 | `AdvisorCard.tsx` | Display-only collapsible advisor transcript card. Reads structured notes, prioritizes blocker > concern > nit, falls back to raw content. Exports `AdvisorCard`. |
+| `ToolStubRow.tsx` | Renders degraded tool call from `ToolCallStub`. Shows `argsSummary`, head/tail slices, "<N> not loaded", load affordance -> `fetch_tool_payload`. Self-describing — reads no sibling event. See change: hydration-tool-stub-projection. |
 | `agent-card-utils.ts` | Re-export shim. Forwards to `@blackbelt-technology/pi-dashboard-client-utils/agent-card-utils`. Symbol moved in change `complete-flows-plugin-migration` (Layer 0). |
 | `AgentCardShell.tsx` | Re-export shim. Forwards to `@blackbelt-technology/pi-dashboard-client-utils/AgentCardShell`. Symbol moved in change `complete-flows-plugin-migration` (Layer 0). |
 | `ArchiveBrowserView.tsx` | Browser view for archived OpenSpec changes. Exports `ArchiveBrowserView`. → see `ArchiveBrowserView.tsx.AGENTS.md` |

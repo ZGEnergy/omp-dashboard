@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChatMessage, ToolCallState } from "../event-reducer.js";
-import { computeChatFloorSeq, computeToolFloorSeq } from "../two-tier-floors.js";
+import { computeChatFloorSeq, computeStubFloorSeq, computeToolFloorSeq } from "../two-tier-floors.js";
 
 const user = (seq: number): ChatMessage => ({ id: `u${seq}`, role: "user", content: "", timestamp: 0, seq });
 const asst = (seq: number): ChatMessage => ({ id: `a${seq}`, role: "assistant", content: "", timestamp: 0, seq });
@@ -53,5 +53,33 @@ describe("computeToolFloorSeq", () => {
     // 113 bytes/tool. maxBytes=200 → only the newest tool (seq 4, 113 bytes) fits;
     // adding seq 3 pushes cumulative bytes to 226 > 200, so floor drops seq<=3.
     expect(computeToolFloorSeq(tools, 200, 100)).toBe(4);
+  });
+});
+
+// --- Stub tier (change: hydration-tool-stub-projection) ---
+
+describe("computeStubFloorSeq", () => {
+  const calls = (seqs: number[]): ToolCallState[] =>
+    seqs.map((seq) => ({ toolCallId: `t${seq}`, toolName: "bash", status: "complete" as const, seq }));
+
+  it("keeps everything when the count fits", () => {
+    expect(computeStubFloorSeq(calls([1, 2, 3]), 10)).toBe(0);
+  });
+
+  it("returns the seq of the Nth-from-last call", () => {
+    expect(computeStubFloorSeq(calls([1, 5, 9, 12, 20]), 3)).toBe(9);
+  });
+
+  it("ignores calls with no seq", () => {
+    const mixed = [...calls([4, 8]), { toolCallId: "x", toolName: "bash", status: "complete" as const }];
+    expect(computeStubFloorSeq(mixed, 1)).toBe(8);
+  });
+
+  it("evicts everything at a zero budget", () => {
+    expect(computeStubFloorSeq(calls([1, 2, 7]), 0)).toBe(8);
+  });
+
+  it("handles an empty set", () => {
+    expect(computeStubFloorSeq([], 0)).toBe(0);
   });
 });

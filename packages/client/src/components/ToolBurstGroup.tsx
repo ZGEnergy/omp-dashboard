@@ -313,6 +313,7 @@ function BurstBodyItem({
       startedAt={msg.startedAt}
       duration={msg.duration}
       toolDetails={msg.toolDetails}
+      toolStub={msg.toolStub}
       showResultBody={prefs.toolResults || isInputNeededTool(msg.toolName)}
     />
   );

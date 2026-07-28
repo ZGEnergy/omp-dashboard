@@ -1,0 +1,4 @@
+Usage: srclight worktree bootstrap [OPTIONS]
+Try 'srclight worktree bootstrap --help' for help.
+
+Error: No such option '--quiet'.

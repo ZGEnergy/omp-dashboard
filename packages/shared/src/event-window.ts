@@ -1,4 +1,5 @@
-import { prepareEventForReplay, utf8ByteLength, type PrepareEventForReplayOptions } from "./prepare-event-for-replay.js";
+import { type PrepareEventForReplayOptions, prepareEventForReplay, utf8ByteLength } from "./prepare-event-for-replay.js";
+import { makeToolStub, stubbedToolEndEvent, type ToolCallStub } from "./replay-projection.js";
 import type { DashboardEvent } from "./types.js";
 
 /** Default wire/IDB tail budget (~1.5 MiB). */
@@ -31,6 +32,195 @@ export interface EventWindowResult<T> {
   bytes: number;
   /** True when the supplied source is not strictly ascending and contiguous. */
   sourceMalformed?: true;
+}
+
+/**
+ * Fraction of the tail budget tool payloads may occupy. The remainder is a
+ * reserved chat floor that tool content cannot take.
+ *
+ * This is the direct fix for issue #101, where one subagent burst consumed the
+ * whole budget and left a transcript with no readable chat. A per-call cap
+ * alone does not bound N calls x cap; only a hard aggregate ceiling does.
+ * See change: hydration-tool-stub-projection.
+ */
+export const TOOL_CEILING_FRACTION = 0.25;
+
+export interface ToolBudgetResult {
+  events: SeqEvent<DashboardEvent>[];
+  toolBytes: number;
+  chatBytes: number;
+  /** Count of logical calls degraded below `full`. */
+  degraded: number;
+  /** Count of logical calls reduced to `metadata`. */
+  collapsed: number;
+}
+
+const TOOL_EVENT_TYPES = new Set(["tool_execution_start", "tool_execution_update", "tool_execution_end"]);
+
+function toolCallIdOf(event: DashboardEvent): string | undefined {
+  const id = (event.data as Record<string, unknown> | undefined)?.toolCallId;
+  return typeof id === "string" && id.length > 0 ? id : undefined;
+}
+
+function resultTextOf(event: DashboardEvent): string {
+  const result = (event.data as Record<string, unknown> | undefined)?.result;
+  if (typeof result === "string") return result;
+  if (result === undefined || result === null) return "";
+  try {
+    return JSON.stringify(result) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Enforce the tool ceiling / chat floor over a contiguous ascending range.
+ *
+ * Degrades logical tool calls down the ladder (`full` -> `sliced` ->
+ * `metadata`) OLDEST-FIRST, so recent calls keep the most detail, until tool
+ * bytes fit under `budgetBytes * TOOL_CEILING_FRACTION`.
+ *
+ * Blanks nothing and removes nothing: the returned seq set is identical to the
+ * input's. Only `tool_execution_end` payloads change, and each becomes a
+ * self-describing `ToolCallStub` re-fetchable by `toolCallId`. Chat events are
+ * never touched — the chat floor is enforced by construction, not by trimming.
+ *
+ * A tool with no `tool_execution_end` in the range is still running and is
+ * never degraded. Pure: the input array and its events are never mutated.
+ */
+interface LogicalCallEnd {
+  index: number;
+  toolCallId: string;
+  /** The call's ANCHOR — its `tool_execution_start` seq, i.e. its row position. */
+  startSeq: number;
+}
+
+/**
+ * Index the terminal event of every logical tool call, ordered by ANCHOR so
+ * "oldest-first" means oldest by transcript position rather than by end time
+ * (they differ whenever calls overlap).
+ */
+function indexLogicalCallEnds(events: readonly SeqEvent<DashboardEvent>[]): LogicalCallEnd[] {
+  const ends: LogicalCallEnd[] = [];
+  const startSeqById = new Map<string, number>();
+  for (let index = 0; index < events.length; index += 1) {
+    const entry = events[index]!;
+    const toolCallId = toolCallIdOf(entry.event);
+    if (!toolCallId) continue;
+    if (entry.event.eventType === "tool_execution_start" && !startSeqById.has(toolCallId)) {
+      startSeqById.set(toolCallId, entry.seq);
+    }
+    if (entry.event.eventType === "tool_execution_end") {
+      ends.push({ index, toolCallId, startSeq: startSeqById.get(toolCallId) ?? entry.seq });
+    }
+  }
+  return ends.sort((a, b) => a.startSeq - b.startSeq);
+}
+
+/**
+ * Rewrite one logical call's terminal event at `level`, or return `null` when
+ * it already sits at that rung. Never moves the event: same seq, same
+ * eventType, payload replaced by a stub.
+ */
+function degradeCallEnd(
+  entry: SeqEvent<DashboardEvent>,
+  toolCallId: string,
+  level: ToolCallStub["detailLevel"],
+): { replacement: SeqEvent<DashboardEvent>; wasFull: boolean } | null {
+  const data = entry.event.data as Record<string, unknown> | undefined;
+  const existing = data?.toolStub as ToolCallStub | undefined;
+  if (existing?.detailLevel === level) return null;
+  const raw = existing ? `${existing.head ?? ""}${existing.tail ?? ""}` : resultTextOf(entry.event);
+  const stub = makeToolStub({
+    toolCallId,
+    toolName: typeof data?.toolName === "string" ? data.toolName : (existing?.toolName ?? "unknown"),
+    args: data?.args as Record<string, unknown> | undefined,
+    result: raw,
+    status: data?.isError === true ? "error" : "ok",
+    startedAt: typeof data?.startedAt === "number" ? data.startedAt : entry.event.timestamp,
+    detailLevel: level,
+  });
+  // `raw` is already a slice once a stub exists; keep the ORIGINAL full size so
+  // the UI reports the true unloaded byte count, not the sliced one.
+  stub.fullBytes = existing ? existing.fullBytes : raw.length;
+  return {
+    replacement: { seq: entry.seq, event: stubbedToolEndEvent(entry.event, stub) },
+    wasFull: existing === undefined,
+  };
+}
+
+/**
+ * Split the range's byte cost into tool-tier and chat-tier totals.
+ *
+ * Totals are tracked INCREMENTALLY from here on. Recomputing them inside the
+ * degradation loop would re-serialize the whole range once per call — O(n^2)
+ * over multi-hundred-KB payloads, which timed out at 500 calls.
+ */
+function tallyBytes(events: readonly SeqEvent<DashboardEvent>[]): { toolBytes: number; chatBytes: number } {
+  let toolBytes = 0;
+  let chatBytes = 0;
+  for (const entry of events) {
+    const size = estimateSeqEventBytes(entry);
+    if (TOOL_EVENT_TYPES.has(entry.event.eventType)) toolBytes += size;
+    else chatBytes += size;
+  }
+  return { toolBytes, chatBytes };
+}
+
+/**
+ * One oldest-first degradation pass at a single rung. Mutates `out` in place
+ * (it is already a private copy) and stops as soon as tool bytes fit.
+ */
+function degradePass(
+  out: SeqEvent<DashboardEvent>[],
+  ends: readonly LogicalCallEnd[],
+  level: ToolCallStub["detailLevel"],
+  startingToolBytes: number,
+  ceiling: number,
+): { toolBytes: number; degraded: number; collapsed: number } {
+  let toolBytes = startingToolBytes;
+  let degraded = 0;
+  let collapsed = 0;
+  for (const end of ends) {
+    if (toolBytes <= ceiling) break;
+    const entry = out[end.index]!;
+    const result = degradeCallEnd(entry, end.toolCallId, level);
+    if (!result) continue;
+    const delta = estimateSeqEventBytes(result.replacement) - estimateSeqEventBytes(entry);
+    // A stub envelope costs ~150-250 B, so degrading a call whose payload is
+    // already smaller than that GROWS the range while destroying its output —
+    // strictly worse on both axes. Leave those alone.
+    if (delta >= 0) continue;
+    toolBytes += delta;
+    out[end.index] = result.replacement;
+    if (result.wasFull) degraded += 1;
+    if (level === "metadata") collapsed += 1;
+  }
+  return { toolBytes, degraded, collapsed };
+}
+
+export function applyToolBudget(
+  events: readonly SeqEvent<DashboardEvent>[],
+  budgetBytes: number,
+): ToolBudgetResult {
+  const ceiling = Math.floor(budgetBytes * TOOL_CEILING_FRACTION);
+  const out = events.slice();
+  const ends = indexLogicalCallEnds(out);
+  const { toolBytes: initialToolBytes, chatBytes } = tallyBytes(out);
+
+  let toolBytes = initialToolBytes;
+  let degraded = 0;
+  let collapsed = 0;
+  // Two passes, oldest-first. Pass 1 slices; pass 2 collapses to metadata only
+  // where slicing alone left tool bytes above the ceiling.
+  for (const level of ["sliced", "metadata"] as const) {
+    const pass = degradePass(out, ends, level, toolBytes, ceiling);
+    toolBytes = pass.toolBytes;
+    degraded += pass.degraded;
+    collapsed += pass.collapsed;
+  }
+
+  return { events: out, toolBytes, chatBytes, degraded, collapsed };
 }
 
 /** Clamp a requested budget into the allowed range. Non-finite / missing → default. */
@@ -77,10 +267,33 @@ function isDashboardEvent(value: unknown): value is DashboardEvent {
   }
 }
 
-function snapshotContiguousAscending(events: unknown): SeqEvent<DashboardEvent>[] | null {
+/**
+ * Snapshot the source's longest CONTIGUOUS SUFFIX, or `null` when the source is
+ * genuinely invalid (bad entry shape, descending or duplicate seqs).
+ *
+ * A seq GAP is not invalid — it is the normal state of a trimmed session. The
+ * memory event store's `trim()` drops the oldest non-essential events while
+ * preserving `message_start`/`message_end` in place, so every session past
+ * `DEFAULT_MAX_EVENTS_PER_SESSION` has a sparse retained range. Rejecting the
+ * whole source on a gap made those sessions hydrate to a completely empty
+ * transcript (only live-streamed events rendered).
+ *
+ * Windowing over the contiguous suffix serves the newest history while keeping
+ * the DELIVERED range dense, which is non-negotiable: `SessionReplayLedger`
+ * accepts strictly `cursor + 1` and resets on `gap_overflow`, so a sparse wire
+ * model is not an option (that was PR #102's dead end).
+ *
+ * `truncatedAtGap` tells the caller older content exists below the suffix, so
+ * `hasMoreOlder` stays accurate and load-older keeps working.
+ * See change: fix-sparse-store-empty-hydration.
+ */
+function snapshotContiguousAscending(
+  events: unknown,
+): { snapshot: SeqEvent<DashboardEvent>[]; truncatedAtGap: boolean } | null {
   if (!Array.isArray(events)) return null;
-  const snapshot: SeqEvent<DashboardEvent>[] = [];
+  const all: SeqEvent<DashboardEvent>[] = [];
   let previousSeq: number | undefined;
+  let lastGapIndex = -1;
   try {
     for (const entry of events) {
       if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
@@ -88,11 +301,16 @@ function snapshotContiguousAscending(events: unknown): SeqEvent<DashboardEvent>[
       const seq = record.seq;
       const event = record.event;
       if (typeof seq !== "number" || !Number.isSafeInteger(seq) || !isDashboardEvent(event)) return null;
-      if (previousSeq !== undefined && seq !== previousSeq + 1) return null;
-      snapshot.push({ seq, event });
+      // Descending or duplicate seqs are corruption, not trimming — still fatal.
+      if (previousSeq !== undefined && seq <= previousSeq) return null;
+      if (previousSeq !== undefined && seq !== previousSeq + 1) lastGapIndex = all.length;
+      all.push({ seq, event });
       previousSeq = seq;
     }
-    return snapshot;
+    return {
+      snapshot: lastGapIndex === -1 ? all : all.slice(lastGapIndex),
+      truncatedAtGap: lastGapIndex !== -1,
+    };
   } catch {
     return null;
   }
@@ -186,10 +404,13 @@ function resultFromSelection<T>(
   selected: SeqEvent<T>[],
   bytes: number,
   partialHead: boolean,
+  truncatedAtGap = false,
 ): EventWindowResult<T> {
   return {
     events: selected,
-    hasMoreOlder: selected.length < sourceLength,
+    // A source truncated at a gap always has older content below it, even when
+    // the whole contiguous suffix fits the budget.
+    hasMoreOlder: truncatedAtGap || selected.length < sourceLength,
     partialHead,
     windowMinSeq: selected[0]?.seq ?? null,
     windowMaxSeq: selected.at(-1)?.seq ?? null,
@@ -227,7 +448,7 @@ function compactPreparedSelection(
     remaining -= estimateSeqEventBytes(compactedEntry);
   }
 
-  let bytes = compacted.reduce((total, entry) => total + estimateSeqEventBytes(entry), 0);
+  const bytes = compacted.reduce((total, entry) => total + estimateSeqEventBytes(entry), 0);
   if (bytes > budget) {
     const minimal = compacted.map((entry) => ({
       seq: entry.seq,
@@ -248,9 +469,10 @@ function finalizeSelectedEntries(
   partialHead: boolean,
   budget: number,
   options: EventWindowPreparationOptions,
+  truncatedAtGap = false,
 ): EventWindowResult<DashboardEvent> {
   if (!options.registerInlineAsset) {
-    return resultFromSelection(source.length, selected, bytes, partialHead);
+    return resultFromSelection(source.length, selected, bytes, partialHead, truncatedAtGap);
   }
 
   const sourceBySeq = new Map(source.map((entry) => [entry.seq, entry]));
@@ -263,6 +485,7 @@ function finalizeSelectedEntries(
       prepared.events,
       preparedBytes,
       partialHead || selectionContainsTruncation(prepared.events, prepared.truncatedSeqs),
+      truncatedAtGap,
     );
   }
 
@@ -275,6 +498,7 @@ function finalizeSelectedEntries(
     compacted.events,
     compacted.bytes,
     partialHead || compacted.truncated || selectionContainsTruncation(compacted.events, prepared.truncatedSeqs),
+    truncatedAtGap,
   );
 }
 
@@ -291,8 +515,9 @@ export function selectNewestEventsByBudget(
   const budget = Number.isFinite(budgetBytes) && budgetBytes > 0
     ? Math.floor(budgetBytes)
     : DEFAULT_TAIL_WINDOW_BYTES;
-  const source = snapshotContiguousAscending(eventsAsc);
-  if (source === null) return malformedWindow();
+  const snapshotResult = snapshotContiguousAscending(eventsAsc);
+  if (snapshotResult === null) return malformedWindow();
+  const { snapshot: source, truncatedAtGap } = snapshotResult;
   if (source.length === 0) return emptyWindow();
 
   const perEventCap = computePerEventCap(budget, options.maxEventBytes);
@@ -332,6 +557,7 @@ export function selectNewestEventsByBudget(
     partialHead,
     budget,
     options,
+    truncatedAtGap,
   );
 }
 
@@ -343,10 +569,13 @@ export function selectOlderEventsByBudget(
   options: EventWindowPreparationOptions = {},
 ): EventWindowResult<DashboardEvent> {
   if (!Number.isSafeInteger(fromSeq)) return malformedWindow();
-  const source = snapshotContiguousAscending(eventsAsc);
-  if (source === null) return malformedWindow();
+  const snapshotResult = snapshotContiguousAscending(eventsAsc);
+  if (snapshotResult === null) return malformedWindow();
   try {
-    const older = source.filter((entry) => entry.seq < fromSeq);
+    // Filter the RAW source, not the contiguous suffix: paging below the gap
+    // must still see the older dense runs. `selectNewestEventsByBudget`
+    // re-snapshots and picks that range's own contiguous suffix.
+    const older = (eventsAsc as readonly SeqEvent<DashboardEvent>[]).filter((entry) => entry.seq < fromSeq);
     return selectNewestEventsByBudget(older, budgetBytes, options);
   } catch {
     return malformedWindow();

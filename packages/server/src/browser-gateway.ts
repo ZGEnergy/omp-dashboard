@@ -12,6 +12,7 @@ import { sanitizeHotWindowReport } from "@blackbelt-technology/pi-dashboard-shar
 import { WebSocket, WebSocketServer } from "ws";
 import { type DirectoryService, hasOpenSpecDir, hasOpenSpecRoot } from "./directory-service.js";
 // PendingLoadManager removed — server loads sessions directly via DirectoryService
+import { handleFetchToolPayload } from "./browser-handlers/tool-payload-handler.js";
 import { createHeadlessPidRegistry, type HeadlessPidRegistry } from "./headless-pid-registry.js";
 import type { HotWindowMetrics } from "./hot-window-metrics.js";
 import type { EventStore } from "./memory-event-store.js";
@@ -703,6 +704,13 @@ export function createBrowserGateway(
             break;
           case "subscribe":
             handleSubscribe(msg, subs, ctx);
+            break;
+          // Re-inflate a stubbed tool payload. Read-only and outside the replay
+          // queue: it mutates no state and enters no ledger, so it can never
+          // interleave with or corrupt an in-flight replay.
+          // See change: hydration-tool-stub-projection.
+          case "fetch_tool_payload":
+            sendTo(ws, handleFetchToolPayload(msg, eventStore));
             break;
           case "unsubscribe":
             subs.delete(msg.sessionId);

@@ -843,6 +843,7 @@ export interface AutoNameErrorBrowserMessage {
 }
 
 export type ServerToBrowserMessage =
+  | ToolPayloadMessage
   | ServerRestartingMessage
   | AutoNameErrorBrowserMessage
   | RecoveryOfferMessage
@@ -992,6 +993,38 @@ export interface SubscribeMessage {
 export interface UnsubscribeMessage {
   type: "unsubscribe";
   sessionId: string;
+}
+
+/**
+ * Re-inflate a tool payload that hydration or client eviction degraded to a
+ * `ToolCallStub`. Keyed by `toolCallId`, NOT seq: tool ids are stable across
+ * replay and eviction and survive re-hydration, so the client need not track
+ * which seq a payload lived at after the row degrades.
+ * See change: hydration-tool-stub-projection.
+ */
+export interface FetchToolPayloadMessage {
+  type: "fetch_tool_payload";
+  sessionId: string;
+  toolCallId: string;
+  /** Echoed on the response so concurrent fetches never cross. */
+  requestId: string;
+}
+
+/**
+ * Response to `fetch_tool_payload`. Never enters the client ledger — the client
+ * holds it in a short-lived LRU keyed by `toolCallId`, or re-inflating a few old
+ * tools walks it back into the memory ceiling eviction just relieved.
+ * See change: hydration-tool-stub-projection.
+ */
+export interface ToolPayloadMessage {
+  type: "tool_payload";
+  sessionId: string;
+  requestId: string;
+  toolCallId: string;
+  payload?: string;
+  /** Set when the payload exceeded the server response cap; UI offers "open raw". */
+  truncated?: true;
+  error?: "not_found" | "unavailable";
 }
 
 export interface SendPromptToBrowserMessage {
@@ -1668,6 +1701,7 @@ export interface HotWindowReportMessage {
 
 export type BrowserToServerMessage =
   | SubscribeMessage
+  | FetchToolPayloadMessage
   | ReplayDiagnosticMessage
   | HotWindowReportMessage
   | UnsubscribeMessage

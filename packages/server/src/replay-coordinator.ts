@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { BrowserToServerMessage, EventReplayMessage, ReplayErrorCode, ServerToBrowserMessage, SessionStateResetReason } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
-import { clampTailWindowBytes, selectNewestEventsByBudget, selectOlderEventsByBudget } from "@blackbelt-technology/pi-dashboard-shared/event-window.js";
+import { applyToolBudget, clampTailWindowBytes, selectNewestEventsByBudget, selectOlderEventsByBudget } from "@blackbelt-technology/pi-dashboard-shared/event-window.js";
+import { coalesceProjection } from "@blackbelt-technology/pi-dashboard-shared/replay-projection.js";
 import { prepareEventForReplay, utf8ByteLength } from "@blackbelt-technology/pi-dashboard-shared/prepare-event-for-replay.js";
 import type { WebSocket } from "ws";
 import type { BrowserHandlerContext } from "./browser-handlers/handler-context.js";
@@ -85,61 +86,47 @@ function replayKindFor(msg: Extract<BrowserToServerMessage, { type: "subscribe" 
 }
 
 /**
- * The bridge emits a full assistant snapshot for every streamed delta. During
- * a tool-heavy turn those snapshots consume the tail window before its actual
- * messages do. Preserve sequence continuity with inert update events, retain
- * the newest unfinished text snapshot, and let completed message_end events
- * provide their canonical content.
+ * The single hydration projection entry point.
+ *
+ * Coalescing is safe for every replay kind — it only blanks superseded payloads
+ * in place. The tool BUDGET is applied only to windows that are actually
+ * byte-bounded (cold `tail` and `older` paging). A `delta` must stay a
+ * byte-faithful contiguous prefix of the client's missing range, and legacy
+ * `full` mode has no budget to enforce, so neither is degraded.
+ *
+ * `fromSeq` is load-bearing for `older`. Degradation is oldest-first against
+ * whatever range it is handed, so budgeting the WHOLE session would spend the
+ * entire tool ceiling on the newest calls — which are not in the older page at
+ * all — and hand every row in the page back as a content-free `metadata` stub
+ * while leaving most of the byte budget unspent. Restricting the source to
+ * `seq < fromSeq` makes "oldest-first" mean oldest *within the page*, so the
+ * newest rows of that page keep the most detail. `cold`+`tail` needs no such
+ * bound: its window IS the tail, so the newest calls are the ones delivered.
+ *
+ * Live streaming never reaches this function — `publishLive` sends raw events.
+ * See change: hydration-tool-stub-projection.
  */
-function isToolOnlyAssistantMessage(data: Record<string, unknown> | undefined): boolean {
-  const message = (data as any)?.message;
-  const content = message?.content;
-  if (message?.role !== "assistant" || !Array.isArray(content)) return false;
-  return content.some((part: any) => part?.type === "toolCall") && content.every((part: any) => {
-    if (part?.type === "toolCall") return true;
-    if (part?.type !== "thinking") return false;
-    return !part.thinking && !part.text;
-  });
-}
-
-function compactStreamUpdates(entries: readonly StoredEvent[]): StoredEvent[] {
-  const compacted = entries.slice();
-  let latestTextUpdate: number | null = null;
-  const noop = (index: number) => {
-    const entry = compacted[index]!;
-    compacted[index] = {
-      ...entry,
-      event: { eventType: "message_update", timestamp: entry.event.timestamp, data: {} } as StoredEvent["event"],
-    };
-  };
-
-  for (let index = 0; index < compacted.length; index += 1) {
-    const entry = compacted[index]!;
-    const event = entry.event as any;
-    const data = event.data as Record<string, unknown> | undefined;
-    if ((event.eventType === "message_update" || event.eventType === "message_end") && isToolOnlyAssistantMessage(data)) {
-      noop(index);
-      continue;
-    }
-    if (event.eventType === "message_end" && (data as any)?.message?.role === "assistant") {
-      if (latestTextUpdate !== null) noop(latestTextUpdate);
-      latestTextUpdate = null;
-      continue;
-    }
-    if (event.eventType !== "message_update" || (data as any)?.message?.role !== "assistant") continue;
-
-    const assistantEvent = (data as any).assistantMessageEvent;
-    if (typeof assistantEvent?.type === "string" && assistantEvent.type.startsWith("thinking_")) {
-      // Keep incremental thinking semantics without carrying the duplicate
-      // assistant-text snapshot alongside every thinking delta.
-      const { message: _message, ...withoutMessage } = data as any;
-      compacted[index] = { ...entry, event: { ...event, data: withoutMessage } };
-      continue;
-    }
-    if (latestTextUpdate !== null) noop(latestTextUpdate);
-    latestTextUpdate = index;
+export function projectForHydration(
+  events: readonly StoredEvent[],
+  budgetBytes: number,
+  replayKind: ReplayKind,
+  mode: "full" | "tail" | undefined,
+  fromSeq?: number,
+): StoredEvent[] {
+  const coalesced = coalesceProjection(events) as StoredEvent[];
+  if (replayKind === "older") {
+    if (fromSeq == null) return coalesced;
+    const page = coalesced.filter((entry) => entry.seq < fromSeq);
+    const budgeted = applyToolBudget(page, budgetBytes).events as StoredEvent[];
+    const bySeq = new Map(budgeted.map((entry) => [entry.seq, entry]));
+    // Splice the budgeted page back over its source range: the caller still
+    // selects from the full coalesced array, and its seq set must not change.
+    return coalesced.map((entry) => bySeq.get(entry.seq) ?? entry);
   }
-  return compacted;
+  if (replayKind === "cold" && mode === "tail") {
+    return applyToolBudget(coalesced, budgetBytes).events as StoredEvent[];
+  }
+  return coalesced;
 }
 
 export function createReplayCoordinator(options: ReplayCoordinatorOptions): ReplayCoordinator {
@@ -391,14 +378,14 @@ export function createReplayCoordinator(options: ReplayCoordinatorOptions): Repl
     // Selection spans the whole window budget across as many frames as it
     // needs; a single event is still prepared (and accounted) at frame size.
     const selectionOptions = { maxEventBytes: windowBudget };
-    const raw = compactStreamUpdates(options.store.getEvents(sessionId, 1));
+    const raw = projectForHydration(options.store.getEvents(sessionId, 1), budget, request.replayKind, msg.mode, msg.fromSeq);
     const retainedRange = options.store.getRetainedRange(sessionId);
     const needsPersistedPaging = retainedRange.historyTruncated && (retainedRange.retainedMinSeq ?? 1) > 1;
     let persistedRaw: StoredEvent[] | undefined;
     if (needsPersistedPaging && (request.replayKind === "older" || (request.replayKind === "cold" && msg.mode === "tail"))) {
       const persisted = await loadPersistedSource(sessionId, ctx);
       if (!requestValid(state, request, ws)) return;
-      if (persisted.ok) persistedRaw = persisted.events ? compactStreamUpdates(persisted.events) : undefined;
+      if (persisted.ok) persistedRaw = persisted.events ? projectForHydration(persisted.events, budget, request.replayKind, msg.mode, msg.fromSeq) : undefined;
     }
     const snapshotMax = raw.at(-1)?.seq ?? 0;
     for (const [seq, { bytes }] of state.pendingLive) {
