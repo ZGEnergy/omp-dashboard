@@ -461,48 +461,48 @@ describe("memory-event-store", () => {
   });
 
   // See change: preserve-chat-head-on-event-trim.
-  describe("essential chat events survive trimming (subagent flood)", () => {
-    it("preserves message_start/message_end and drops oldest non-essential", () => {
+  // Trimming is a CONTIGUOUS PREFIX drop.
+  //
+  // This block previously asserted the opposite contract: `message_start` /
+  // `message_end` were preserved in place while the non-essential events between
+  // them were dropped, deliberately leaving seq gaps, so the transcript head
+  // survived a subagent flood (change: preserve-chat-head-on-event-trim).
+  //
+  // Measured against a real long-running session (~20% essential events), that
+  // degenerates without bound — each trim strands more essentials and drops
+  // everything between them:
+  //
+  //   inserted   retained   gaps     longest contiguous tail
+  //     30,000     20,234    2,464            17,770
+  //    120,000     20,027   20,000                27
+  //    231,000     20,003   19,999                 4
+  //
+  // A sparse buffer is undeliverable: a replay window must be gap-free because
+  // `SessionReplayLedger` accepts strictly `cursor + 1` and resets on
+  // `gap_overflow`. With a 4-event dense tail the session hydrated to an empty
+  // transcript, so the preserved chat head could never actually be shown.
+  // Density beats head-preservation.
+  // See change: fix-fragmenting-event-store-trim.
+  describe("trimming keeps the retained range dense", () => {
+    it("drops the oldest events, essential or not", () => {
       const store = createMemoryEventStore(neverPinned, 100, 3);
-      store.insertEvent("s1", makeEvent("message_start")); // seq 1 (chat head)
-      store.insertEvent("s1", makeEvent("message_end")); //   seq 2 (chat head)
-      store.insertEvent("s1", makeEvent("tool_execution_start")); // seq 3 noise
-      store.insertEvent("s1", makeEvent("subagent_started")); //     seq 4 noise
+      store.insertEvent("s1", makeEvent("message_start")); // seq 1
+      store.insertEvent("s1", makeEvent("message_end")); //   seq 2
+      store.insertEvent("s1", makeEvent("tool_execution_start")); // seq 3
+      store.insertEvent("s1", makeEvent("subagent_started")); //     seq 4
 
       const events = store.getEvents("s1", 1);
-      expect(events).toHaveLength(3);
-      // The oldest non-essential event (seq 3) is dropped before either
-      // essential chat event, preserving the transcript head and seq gaps.
-      expect(events.map((e) => e.seq)).toEqual([1, 2, 4]);
-      expect(events.map((e) => e.event.eventType)).toEqual([
-        "message_start",
-        "message_end",
-        "subagent_started",
-      ]);
+      expect(events.map((e) => e.seq)).toEqual([2, 3, 4]);
     });
 
-    it("drops all noise before touching essentials, then oldest essential under extreme pressure", () => {
+    it("leaves no gaps when chat and noise are interleaved", () => {
       const store = createMemoryEventStore(neverPinned, 100, 3);
-      // Interleave 4 chat events with 4 subagent/tool events — 8 total, cap 3.
-      store.insertEvent("s1", makeEvent("message_start")); // 1
-      store.insertEvent("s1", makeEvent("tool_execution_start")); // 2
-      store.insertEvent("s1", makeEvent("subagent_started")); // 3
-      store.insertEvent("s1", makeEvent("message_end")); // 4
-      store.insertEvent("s1", makeEvent("tool_execution_end")); // 5
-      store.insertEvent("s1", makeEvent("message_start")); // 6
-      store.insertEvent("s1", makeEvent("subagent_completed")); // 7
-      store.insertEvent("s1", makeEvent("message_end")); // 8
-
+      for (const t of ["message_start", "tool_execution_start", "subagent_started", "message_end",
+        "tool_execution_end", "message_start", "subagent_completed", "message_end"]) {
+        store.insertEvent("s1", makeEvent(t));
+      }
       const events = store.getEvents("s1", 1);
-      // Every non-essential event is dropped before an essential. The four
-      // essentials then exceed cap 3, so the oldest essential (seq 1) is
-      // dropped to enforce the bound.
-      expect(events.map((e) => e.event.eventType)).toEqual([
-        "message_end",
-        "message_start",
-        "message_end",
-      ]);
-      expect(events.map((e) => e.seq)).toEqual([4, 6, 8]);
+      expect(events.map((e) => e.seq)).toEqual([6, 7, 8]);
     });
 
     it("defers reclaim until trim slack is exhausted, then reclaims a batch", () => {
@@ -522,25 +522,21 @@ describe("memory-event-store", () => {
       expect(events.at(-1)?.seq).toBe(cap + slack + 1);
     });
 
-    it("survives a subagent flood: chat head kept, buffer stays bounded", () => {
+    it("survives a subagent flood: buffer stays bounded AND dense", () => {
       const cap = 500; // slack = floor(500*0.05) = 25
       const store = createMemoryEventStore(neverPinned, 100, cap);
-      // Two opening chat events, then a flood of 10k subagent/tool events.
-      store.insertEvent("s1", makeEvent("message_start")); // seq 1 (chat head)
-      store.insertEvent("s1", makeEvent("message_end")); //   seq 2 (chat head)
+      store.insertEvent("s1", makeEvent("message_start")); // seq 1
+      store.insertEvent("s1", makeEvent("message_end")); //   seq 2
       for (let i = 0; i < 10_000; i++) {
         store.insertEvent("s1", makeEvent("tool_execution_start"));
       }
 
       const events = store.getEvents("s1", 1);
-      // Buffer never exceeds cap + slack (hysteresis bound).
       expect(events.length).toBeLessThanOrEqual(cap + 25);
-      // The flood evicts only non-essential events; both opening chat events
-      // remain present with their original sequence numbers and types.
-      expect(events.map((e) => e.seq)).toContain(1);
-      expect(events.map((e) => e.seq)).toContain(2);
-      expect(events.find((e) => e.seq === 1)?.event.eventType).toBe("message_start");
-      expect(events.find((e) => e.seq === 2)?.event.eventType).toBe("message_end");
+      // The opening chat events are gone — but what remains is deliverable,
+      // which the stranded head never was.
+      expect(events.every((e, i) => i === 0 || e.seq === events[i - 1].seq + 1)).toBe(true);
+      expect(events.at(-1)?.seq).toBe(10_002);
     });
   });
 
@@ -675,22 +671,20 @@ describe("memory-event-store", () => {
     it("counts trimmed events, exactly the dropped tool_execution_end, per session", () => {
       // cap = 3, trimSlack = 0 → trims on every over-cap insert.
       const store = createMemoryEventStore(neverPinned, 100, 3);
-      // seq1..3 fill the cap; message_* are essential (never dropped).
-      store.insertEvent("s1", makeEvent("message_start")); // 1 essential
-      store.insertEvent("s1", makeEvent("message_end")); // 2 essential
-      store.insertEvent("s1", makeEvent("tool_execution_end")); // 3 noise
-      // seq4: length 4 > 3 → drop oldest non-essential = seq3 (tool_execution_end).
-      store.insertEvent("s1", makeEvent("tool_execution_start")); // 4
-      // seq5: kept [1,2,4] + 5 = 4 > 3 → drop seq4 (tool_execution_start, not a te).
-      store.insertEvent("s1", makeEvent("tool_execution_end")); // 5
-      // seq6: kept [1,2,5] + 6 = 4 > 3 → drop seq5 (tool_execution_end).
-      store.insertEvent("s1", makeEvent("tool_execution_start")); // 6
+      // Trimming drops a contiguous prefix, so the oldest event goes first
+      // regardless of type. See change: fix-fragmenting-event-store-trim.
+      store.insertEvent("s1", makeEvent("message_start")); // 1
+      store.insertEvent("s1", makeEvent("message_end")); // 2
+      store.insertEvent("s1", makeEvent("tool_execution_end")); // 3
+      store.insertEvent("s1", makeEvent("tool_execution_start")); // 4 → drops seq1
+      store.insertEvent("s1", makeEvent("tool_execution_end")); // 5 → drops seq2
+      store.insertEvent("s1", makeEvent("tool_execution_start")); // 6 → drops seq3
 
       const stats = store.getTrimStats();
-      // Three oldest whole events are dropped: seq3 and seq5 are terminal
-      // tool_execution_end events; seq4 is a tool_execution_start (not a te).
+      // Three oldest whole events dropped: seq1, seq2, seq3. Only seq3 is a
+      // tool_execution_end.
       expect(stats.trimmedEvents.total).toBe(3);
-      expect(stats.trimmedEvents.toolExecutionEnd).toBe(2);
+      expect(stats.trimmedEvents.toolExecutionEnd).toBe(1);
       expect(stats.trimmedEvents.bySession).toEqual({ s1: 3 });
     });
 

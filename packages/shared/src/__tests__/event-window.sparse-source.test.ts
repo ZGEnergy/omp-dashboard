@@ -4,20 +4,20 @@ import { selectNewestEventsByBudget, selectOlderEventsByBudget, type SeqEvent } 
 import type { DashboardEvent } from "../types.js";
 
 /**
- * The memory event store's `trim()` deliberately produces a SPARSE retained
- * range: past `DEFAULT_MAX_EVENTS_PER_SESSION` it drops the oldest
- * non-essential events while preserving `message_start`/`message_end` IN PLACE,
- * leaving seq gaps behind.
+ * Sparse-source handling for the replay window selector.
  *
- * The window selector used to treat any gap as a fatal malformed source and
- * return an empty window — so every session past 20k events hydrated to a blank
- * transcript, with only live-streamed events visible. The two contracts were
- * directly contradictory.
+ * The selector used to treat ANY seq gap as a fatal malformed source and return
+ * an empty window. The memory event store's `trim()` used to deliberately
+ * produce gaps (preserving `message_start`/`message_end` in place), so every
+ * session past `DEFAULT_MAX_EVENTS_PER_SESSION` hydrated to a blank transcript.
  *
- * The selector now windows over the longest CONTIGUOUS SUFFIX. That keeps the
- * delivered range dense (the client ledger accepts strictly `cursor + 1` and
- * resets on gaps, so a sparse wire model is not an option) while still serving
- * the newest history. See change: fix-sparse-store-empty-hydration.
+ * `trim()` now drops a contiguous prefix (change: fix-fragmenting-event-store-trim),
+ * so the live store no longer fragments. The selector still tolerates gaps as
+ * defense-in-depth — persisted sessions and pre-existing buffers can present
+ * one — by windowing over the longest CONTIGUOUS SUFFIX. The DELIVERED range
+ * must stay dense regardless: `SessionReplayLedger` accepts strictly
+ * `cursor + 1` and resets on `gap_overflow`.
+ * See change: fix-sparse-store-empty-hydration.
  */
 
 const BUDGET = 1.5 * 1024 * 1024;
@@ -82,10 +82,12 @@ describe("selectNewestEventsByBudget over a sparse source", () => {
 });
 
 describe("end to end against the real store trim", () => {
-  it("REGRESSION: a session past the per-session cap still hydrates a non-empty tail", () => {
+  it("the store now retains a DENSE range, and it hydrates a large tail", () => {
+    // `trim()` drops a contiguous prefix (change: fix-fragmenting-event-store-trim),
+    // so the retained buffer no longer fragments. The sparse handling above
+    // remains as defense-in-depth for any other source (persisted sessions,
+    // legacy buffers) that can still present a gap.
     const store = createMemoryEventStore(() => false);
-    // Interleave the `message_start`/`message_end` events `trim()` preserves in
-    // place — this is what makes the retained range sparse.
     for (let i = 0; i < 30_000; i += 1) {
       const eventType =
         i % 100 === 0 ? "message_start" : i % 100 === 50 ? "message_end" : "tool_execution_update";
@@ -96,14 +98,15 @@ describe("end to end against the real store trim", () => {
       } as unknown as DashboardEvent);
     }
     const events = store.getEvents("s", 1);
-    const hasGap = events.some((e, i) => i > 0 && e.seq !== events[i - 1]!.seq + 1);
-    expect(hasGap, "store trim must still produce a sparse range for this test to be meaningful").toBe(true);
+    expect(events.every((e, i) => i === 0 || e.seq === events[i - 1]!.seq + 1)).toBe(true);
 
     const out = selectNewestEventsByBudget(events, BUDGET, { maxEventBytes: 260_096 });
     expect(out.sourceMalformed).toBeUndefined();
-    expect(out.events.length).toBeGreaterThan(0);
-    const seqs = out.events.map((e) => e.seq);
-    expect(seqs.every((s, i) => i === 0 || s === seqs[i - 1]! + 1)).toBe(true);
+    expect(out.events.length).toBeGreaterThan(1_000);
     expect(out.events.at(-1)!.seq).toBe(30_000);
+    const chat = out.events.filter((e) =>
+      ["message_start", "message_end"].includes(e.event.eventType),
+    ).length;
+    expect(chat, "a hydrated window must contain readable chat").toBeGreaterThan(0);
   });
 });
