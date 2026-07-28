@@ -237,19 +237,29 @@ export function createMemoryEventStore(
     const trimSlack = Math.min(256, Math.floor(maxEventsPerSession * 0.05));
     if (buffer.events.length <= maxEventsPerSession + trimSlack) return;
 
-    let remainingDrops = buffer.events.length - maxEventsPerSession;
-    const removed: StoredEvent[] = [];
-    const retained: StoredEvent[] = [];
-    for (const entry of buffer.events) {
-      const essential = entry.event.eventType === "message_start" || entry.event.eventType === "message_end";
-      if (!essential && remainingDrops > 0) {
-        removed.push(entry);
-        remainingDrops--;
-      } else {
-        retained.push(entry);
-      }
-    }
-    if (remainingDrops > 0) removed.push(...retained.splice(0, remainingDrops));
+    // Trim a CONTIGUOUS PREFIX. The retained range must stay dense: the replay
+    // window selector can only deliver a gap-free run (`SessionReplayLedger`
+    // accepts strictly `cursor + 1` and resets on `gap_overflow`), so anything
+    // stranded behind a gap is undeliverable.
+    //
+    // This previously preserved `message_start`/`message_end` in place and
+    // dropped the non-essential events between them, to keep the transcript
+    // head through a subagent flood (change: preserve-chat-head-on-event-trim).
+    // Measured against a real long-running session (~20% essential events), that
+    // degenerates without bound — each trim strands more essentials and drops
+    // everything between them:
+    //
+    //   inserted   retained   gaps     longest contiguous tail
+    //     30,000     20,234    2,464            17,770
+    //    120,000     20,027   20,000                27
+    //    231,000     20,003   19,999                 4
+    //
+    // A 4-event dense tail hydrates an empty transcript, so the preserved chat
+    // head was unreachable anyway. Density is worth more than the head here.
+    // See change: fix-fragmenting-event-store-trim.
+    const dropCount = buffer.events.length - maxEventsPerSession;
+    const removed = buffer.events.slice(0, dropCount);
+    const retained = buffer.events.slice(dropCount);
 
     buffer.events = retained;
     buffer.historyTruncated = true;
