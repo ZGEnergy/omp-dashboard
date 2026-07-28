@@ -223,6 +223,31 @@ export function applyToolBudget(
   return { events: out, toolBytes, chatBytes, degraded, collapsed };
 }
 
+/**
+ * Collapse EVERY logical tool call in the range to a metadata stub.
+ *
+ * For older (history) pages. The live tail is what the user is reading, so it
+ * keeps full payloads under the normal ceiling; a page being scrolled past does
+ * not need its tool output resident, because `fetch_tool_payload` re-inflates
+ * any stub on click by `toolCallId`.
+ *
+ * The win is depth per round trip. Budgeting older pages like the tail meant
+ * ~1,300 events per 1.5 MiB page — 15 pages and ~21 MiB of transfer to reach
+ * the first prompt of a real 19,677-event session. Stubs make a page cover
+ * multiples of that.
+ *
+ * Implemented as a zero ceiling so there is exactly one degradation ladder:
+ * `applyToolBudget` walks its existing `sliced` then `metadata` passes and,
+ * with nothing to fit under, takes every call to the bottom rung. Calls whose
+ * payload is already smaller than a stub envelope are left alone by the
+ * ladder's own delta check, so this never grows the range.
+ *
+ * See change: cheap-older-pages.
+ */
+export function collapseToolsToMetadata(events: readonly SeqEvent<DashboardEvent>[]): SeqEvent<DashboardEvent>[] {
+  return applyToolBudget(events, 0).events;
+}
+
 /** Clamp a requested budget into the allowed range. Non-finite / missing → default. */
 export function clampTailWindowBytes(requested?: number): number {
   if (requested == null || !Number.isFinite(requested) || requested <= 0) {

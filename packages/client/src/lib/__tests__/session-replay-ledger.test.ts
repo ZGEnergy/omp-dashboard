@@ -192,6 +192,54 @@ describe("SessionReplayLedger", () => {
     expect(ledger.cursor).toBe(3);
   });
 
+  // Regression: retention evicts the OLDEST seq, and load-older ADDS at the
+  // oldest end, so at a full ledger the trim ran on the same admission that
+  // accepted the page and deleted exactly what was just fetched. Measured
+  // against the live server on a real 19,677-event session: paging stalled at
+  // seq 15,060 and never moved again — each further page admitted ~940 events
+  // and evicted all of them. Back-paging silently became a no-op, so the first
+  // user prompt was unreachable no matter how far you scrolled.
+  it("does not evict the older page it just admitted, even at a full cap", () => {
+    const olderFrame = (events: ReturnType<typeof event>[], fromSeq: number) => ({
+      ...cold(events),
+      requestId: `older-${fromSeq}`,
+      replayKind: "older" as const,
+      isLast: true,
+    });
+
+    // A cap that fits exactly the two-event cold baseline — full from the start.
+    const budget = JSON.stringify(event(10)).length * 2;
+    const ledger = new SessionReplayLedger("s", { maxRetainedBytes: budget } as never);
+    ledger.begin({ requestId: "cold-1", kind: "cold", sourceGeneration: "source-a" });
+    ledger.admit(cold([event(10), event(11)]));
+    expect(ledger.minSeq).toBe(10);
+
+    ledger.begin({ requestId: "older-10", kind: "older", sourceGeneration: "source-a", fromSeq: 10 });
+    ledger.admit(olderFrame([event(8), event(9)], 10));
+    expect(ledger.minSeq).toBe(8);
+
+    // The second page must make progress too — this is where it used to stall.
+    ledger.begin({ requestId: "older-8", kind: "older", sourceGeneration: "source-a", fromSeq: 8 });
+    ledger.admit(olderFrame([event(6), event(7)], 8));
+    expect(ledger.minSeq).toBe(6);
+    expect(ledger.events.map((entry) => entry.seq)).toEqual([6, 7, 8, 9, 10, 11]);
+  });
+
+  it("still flushes the paged-in history when the cap is lowered on return to the tail", () => {
+    const budget = JSON.stringify(event(10)).length * 2;
+    const ledger = new SessionReplayLedger("s", { maxRetainedBytes: budget } as never);
+    ledger.begin({ requestId: "cold-1", kind: "cold", sourceGeneration: "source-a" });
+    ledger.admit(cold([event(10), event(11)]));
+    ledger.begin({ requestId: "older-10", kind: "older", sourceGeneration: "source-a", fromSeq: 10 });
+    ledger.admit({ ...cold([event(8), event(9)]), requestId: "older-10", replayKind: "older" as const, isLast: true });
+    expect(ledger.events).toHaveLength(4);
+
+    // Returning to the live tail re-applies the cap — the escape hatch that
+    // keeps "never trim an older page" from growing without bound.
+    expect(ledger.setMaxRetainedBytes(budget)).toBe(true);
+    expect(ledger.events.map((entry) => entry.seq)).toEqual([10, 11]);
+  });
+
   it("setMaxRetainedBytes lifts the cap without pruning and lowering flushes to the new budget", () => {
     const ledger = new SessionReplayLedger("s"); // default cap fits all
     ledger.begin({ requestId: "cold-1", kind: "cold", sourceGeneration: "source-a" });
