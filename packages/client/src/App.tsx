@@ -65,6 +65,7 @@ import { usePiResourceFileFetch } from "./hooks/usePiResourceFileFetch.js";
 import { type ReplayWindowMetadata, SessionReplayController } from "./hooks/useSessionReplayController.js";
 import { useSidebarState } from "./hooks/useSidebarState.js";
 import { useStaleToolReconcile } from "./hooks/useStaleToolReconcile.js";
+import { useToolPayloads } from "./hooks/useToolPayloads.js";
 import { useWebSocket } from "./hooks/useWebSocket.js";
 import { maybeAutoInitWorktreeOnSpawn } from "./lib/auto-init-worktree.js";
 import { EMPTY_CANVAS_STATE } from "./lib/canvas-gate.js";
@@ -469,6 +470,10 @@ export default function App() {
     (editorMatch ? editorParams?.id : undefined);
   const selectedSessionIdRef = useRef<string | undefined>(selectedId);
   selectedSessionIdRef.current = selectedId;
+  // Re-inflation path for tool rows degraded to stubs by hydration or by client
+  // eviction. Cache is session-scoped and lives outside the replay ledger.
+  // See change: hydration-tool-stub-projection.
+  const toolPayloads = useToolPayloads(selectedId, send, onMessage);
 
   // Seek-to-card reveal request. A one-shot `{ sessionId, nonce }`: the Seek
   // button in SessionHeader bumps `nonce` so re-seeking the SAME session (its
@@ -2158,6 +2163,7 @@ export default function App() {
               completedOlderAnchorToken={selectedId ? completedOlderAnchorMap.get(selectedId) ?? null : null}
               onLoadOlder={selectedId && (!isMobile || mobileDetailVisible) ? handleLoadOlder : undefined}
               onExpandEvictedBurst={selectedId && (!isMobile || mobileDetailVisible) ? handleExpandEvictedBurst : undefined}
+              toolPayloads={toolPayloads}
               onCollapseStreamingThinking={selectedId ? handleCollapseStreamingThinking : undefined}
               onVisibleFloorSeqChange={handleVisibleFloorSeqChange}
               onReadingHistoryChange={handleReadingHistoryChange}

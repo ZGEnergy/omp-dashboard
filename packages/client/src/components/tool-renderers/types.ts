@@ -1,4 +1,5 @@
 import type { BrowserToServerMessage } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
+import type { ToolPayloadController } from "../../hooks/useToolPayloads.js";
 import type { ChatImage, SessionState } from "../../lib/event-reducer.js";
 
 /** Context passed to every tool renderer */
@@ -10,6 +11,12 @@ export interface ToolContext {
   session?: SessionState;
   /** Send a message to the server (e.g. subagent resync request). Optional for backward-compat / tests. See change: fix-subagent-live-detail-reliability. */
   send?: (message: BrowserToServerMessage) => void;
+  /**
+   * Read/fetch access for tool rows degraded to a `ToolCallStub` by hydration
+   * or client eviction. Absent → stubs render read-only.
+   * See change: hydration-tool-stub-projection.
+   */
+  toolPayloads?: ToolPayloadController;
   /** Respond to a pending PromptBus request from a tool renderer. */
   onRespondToUi?: (requestId: string, result?: unknown, cancelled?: boolean) => void;
   /** Simple response callback used by interactive renderer integrations. */

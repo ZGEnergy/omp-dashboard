@@ -23,7 +23,7 @@ import type { ChatImage, EvictedToolBurst, InteractiveUiRequest, SessionState } 
 import { formatMessageTime } from "../lib/format.js";
 import { type BurstItem, groupToolBursts, type ToolBurstGroup as ToolBurstGroupData } from "../lib/group-tool-bursts.js";
 import type { ToolCallGroup } from "../lib/group-tool-calls.js";
-import type { ToolPayloadCache } from "../lib/tool-payload-cache.js";
+import type { ToolPayloadController } from "../hooks/useToolPayloads.js";
 import { t as i18nT } from "../lib/i18n";
 import { buildTurnSummaries, type TurnSummary } from "../lib/lineDelta.js";
 import { isOutOfCwd, normalizeUnderCwd } from "../lib/normalize-path.js";
@@ -46,7 +46,6 @@ import { SkillInvocationCard } from "./SkillInvocationCard.js";
 import { useOptionalSplitWorkspace } from "./SplitWorkspaceContext.js";
 import { ThinkingBlock } from "./ThinkingBlock.js";
 import { ToolBurstGroup } from "./ToolBurstGroup.js";
-import { ToolStubRow } from "./ToolStubRow.js";
 import { ToolCallStep } from "./ToolCallStep.js";
 import type { ToolContext } from "./tool-renderers/index.js";
 
@@ -131,10 +130,12 @@ interface Props {
    * non-interactive.
    */
   onExpandEvictedBurst?: (burst: EvictedToolBurst) => void;
-  /** Re-inflate a stubbed tool payload by id. See change: hydration-tool-stub-projection. */
-  onFetchToolPayload?: (toolCallId: string) => void;
-  /** Short-lived LRU of already-fetched payloads; never the replay ledger. */
-  toolPayloads?: ToolPayloadCache;
+  /**
+   * Read/fetch access for degraded tool rows. Absent → stub rows render
+   * read-only with no load affordance.
+   * See change: hydration-tool-stub-projection.
+   */
+  toolPayloads?: ToolPayloadController;
   /** Anchor token returned by the matching older terminal. */
   completedOlderAnchorToken?: string | null;
   /**
@@ -381,11 +382,17 @@ export interface ChatViewHandle {
   scrollToSeq: (seq: number) => void;
 }
 
-const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onRespondToUi, onAbort, onForceKill, onForkFromMessage, onCloseInlineTerminal, pendingSteering, loadingHistory, hasMoreOlder, loadingOlder, mobileActive, mobileActivationEpoch = 0, replayGeneration = 0, onLoadOlder, onExpandEvictedBurst, onFetchToolPayload, toolPayloads, completedOlderAnchorToken, onCollapseStreamingThinking, onVisibleFloorSeqChange, onReadingHistoryChange, onDerivationTiming }, ref) {
+const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, state, toolContext, onRespondToUi, onAbort, onForceKill, onForkFromMessage, onCloseInlineTerminal, pendingSteering, loadingHistory, hasMoreOlder, loadingOlder, mobileActive, mobileActivationEpoch = 0, replayGeneration = 0, onLoadOlder, onExpandEvictedBurst, toolPayloads, completedOlderAnchorToken, onCollapseStreamingThinking, onVisibleFloorSeqChange, onReadingHistoryChange, onDerivationTiming }, ref) {
 
   const rendererToolContext = useMemo<ToolContext>(
-    () => ({ ...toolContext, onRespondToUi: onRespondToUi ?? toolContext.onRespondToUi }),
-    [toolContext, onRespondToUi],
+    () => ({
+      ...toolContext,
+      onRespondToUi: onRespondToUi ?? toolContext.onRespondToUi,
+      // Reaches BOTH leaf render paths (top-level rows and burst members) via
+      // the single `ToolCallStep` they converge on.
+      toolPayloads: toolPayloads ?? toolContext.toolPayloads,
+    }),
+    [toolContext, onRespondToUi, toolPayloads],
   );
   const scrollRef = useRef<HTMLDivElement>(null);
   // Desktop retains its saved anchor; mobile ownership is explicit below.
@@ -1478,20 +1485,6 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
 
         const msg = item as import("../lib/event-reducer.js").ChatMessage;
 
-        // A degraded tool row renders from its stub instead of its payload.
-        // Same transcript position as the full row it replaces — this is a
-        // payload swap, never a reordering.
-        // See change: hydration-tool-stub-projection.
-        if (msg.toolStub) {
-          const toolStub = msg.toolStub;
-          return (
-            <ToolStubRow
-              stub={toolStub}
-              cached={toolPayloads?.get(toolStub.toolCallId)}
-              onFetch={onFetchToolPayload ? () => onFetchToolPayload(toolStub.toolCallId) : undefined}
-            />
-          );
-        }
 
         // `/view` preview rows render as a `PreviewCard` regardless of role.
         // Filtered out of the pi-bound message stream by the bridge so the
@@ -1625,6 +1618,7 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
               startedAt={msg.startedAt}
               duration={msg.duration}
               toolDetails={msg.toolDetails}
+              toolStub={msg.toolStub}
               showResultBody={prefs.toolResults || isInputNeededTool(msg.toolName)}
               onAbort={msg.toolStatus === "running" ? onAbort : undefined}
               onForceKill={msg.toolStatus === "running" ? onForceKill : undefined}

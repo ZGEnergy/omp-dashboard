@@ -4,6 +4,8 @@ import { useSlotRegistryOrNull } from "@blackbelt-technology/dashboard-plugin-ru
 import { mdiAlert, mdiAlertCircle, mdiCheck, mdiChevronDown, mdiChevronRight, mdiHelpCircleOutline, mdiLoading, mdiStop } from "@mdi/js";
 import { Icon } from "@mdi/react";
 import React, { type ReactNode, useState } from "react";
+import type { ToolCallStub } from "@blackbelt-technology/pi-dashboard-shared/replay-projection.js";
+import { ToolStubRow } from "./ToolStubRow.js";
 import { useMobile } from "../hooks/useMobile.js";
 import { useToolFullResult } from "../hooks/useToolFullResult.js";
 import type { ChatImage } from "../lib/event-reducer.js";
@@ -66,6 +68,16 @@ interface Props {
   onForceKill?: () => void;
   /** When true, show a "superseded" badge (retried tool call). */
   isSuperseded?: boolean;
+  /**
+   * Set when this call's payload was degraded to a stub by server hydration or
+   * client eviction. Takes precedence over `result`: the row renders as a
+   * `ToolStubRow` with a load-on-demand affordance instead of a full card.
+   * Handled here rather than at each call site because BOTH the top-level
+   * ChatView row path and the `ToolBurstGroup` member path converge on this
+   * component — a burst is exactly where degraded rows cluster (#101).
+   * See change: hydration-tool-stub-projection.
+   */
+  toolStub?: ToolCallStub;
 }
 
 const statusIcons: Record<string, ReactNode> = {
@@ -74,7 +86,7 @@ const statusIcons: Record<string, ReactNode> = {
   error: <Icon path={mdiAlertCircle} size={0.55} />,
 };
 
-export function ToolCallStep({ toolName, toolCallId, args, status, result, images, context, startedAt, duration, toolDetails, showResultBody = true, hideStatusIcon = false, onAbort, onForceKill, isSuperseded = false }: Props) {
+export function ToolCallStep({ toolName, toolCallId, args, status, result, images, context, startedAt, duration, toolDetails, showResultBody = true, hideStatusIcon = false, onAbort, onForceKill, isSuperseded = false, toolStub }: Props) {
   const isMobile = useMobile();
   const hasImages = images && images.length > 0;
   const isAgentRunning = toolName === "Agent" && status === "running";
@@ -141,6 +153,22 @@ export function ToolCallStep({ toolName, toolCallId, args, status, result, image
   // ≥44px target with a visible resting boundary — a hover-only accent never fires on
   // touch. See change: mobile-stop-buttons-not-visible.
   const mobileStopCls = "ml-1 shrink-0 min-h-[44px] min-w-[44px] items-center justify-center rounded inline-flex";
+
+  // Placed AFTER every hook (rules of hooks): a degraded call renders as a
+  // self-describing stub instead of a full card, at the same transcript
+  // position. See change: hydration-tool-stub-projection.
+  if (toolStub) {
+    const payloads = context.toolPayloads;
+    return (
+      <ToolStubRow
+        stub={toolStub}
+        cached={payloads?.get(toolStub.toolCallId)}
+        loading={payloads?.isLoading(toolStub.toolCallId)}
+        error={payloads?.isError(toolStub.toolCallId)}
+        onFetch={payloads ? () => payloads.fetch(toolStub.toolCallId) : undefined}
+      />
+    );
+  }
 
   return (
     <div className={`${isMobile ? "mx-2" : "mx-4"} border-l-2 border-[var(--border-secondary)] pl-3`}>
