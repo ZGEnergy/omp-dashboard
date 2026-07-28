@@ -117,6 +117,21 @@ function toolCallIdOf(event: DashboardEvent): string | undefined {
  * creates the tool row. Everything else passes through untouched. Output seqs
  * equal input seqs. Pure: the input array and its events are never mutated.
  */
+type EventClass = "tool-only-shell" | "text-run-member" | "tool-progress" | "tool-end" | "other";
+
+/** Single classification point for the coalescing rules — order matters. */
+function classify(event: DashboardEvent): EventClass {
+  const type = event.eventType;
+  if ((type === "message_update" || type === "message_end") && isToolOnlyAssistantMessage(event)) {
+    return "tool-only-shell";
+  }
+  if (isAssistantTextUpdate(event)) return "text-run-member";
+  if (!toolCallIdOf(event)) return "other";
+  if (type === "tool_execution_update") return "tool-progress";
+  if (type === "tool_execution_end") return "tool-end";
+  return "other";
+}
+
 export function coalesceProjection(events: readonly SeqEvent<DashboardEvent>[]): SeqEvent<DashboardEvent>[] {
   const out = events.slice();
   let runLast: number | null = null;
@@ -125,32 +140,38 @@ export function coalesceProjection(events: readonly SeqEvent<DashboardEvent>[]):
 
   for (let index = 0; index < out.length; index += 1) {
     const entry = out[index]!;
-    // Rule 3, checked first: a tool-only assistant shell has no text to
-    // preserve, so it is blanked outright rather than joining a run. Applies to
-    // `message_end` too — its canonical content is the tool events themselves.
-    if (
-      (entry.event.eventType === "message_update" || entry.event.eventType === "message_end") &&
-      isToolOnlyAssistantMessage(entry.event)
-    ) {
-      out[index] = blank(entry);
-      continue;
-    }
-    if (isAssistantTextUpdate(entry.event)) {
-      if (runLast !== null) out[runLast] = blank(out[runLast]!);
-      runLast = index;
-      continue;
-    }
-    // Any non-update event closes the current run: its last member stays live.
-    runLast = null;
-
-    const toolCallId = toolCallIdOf(entry.event);
-    if (!toolCallId) continue;
-    if (entry.event.eventType === "tool_execution_update") {
-      const previous = lastToolUpdate.get(toolCallId);
-      if (previous !== undefined) out[previous] = blank(out[previous]!);
-      lastToolUpdate.set(toolCallId, index);
-    } else if (entry.event.eventType === "tool_execution_end") {
-      terminated.add(toolCallId);
+    switch (classify(entry.event)) {
+      // Rule 3: a tool-only assistant shell has no text to preserve, so it is
+      // blanked outright rather than joining a run. It does NOT close the
+      // current run — there is no rendered content at its position to order
+      // around. Applies to `message_end` too: its canonical content is the
+      // tool events themselves.
+      case "tool-only-shell":
+        out[index] = blank(entry);
+        break;
+      // Rule 1: a run member supersedes the previous one (cumulative content).
+      case "text-run-member":
+        if (runLast !== null) out[runLast] = blank(out[runLast]!);
+        runLast = index;
+        break;
+      // Rule 2: progress updates are superseded within a call.
+      case "tool-progress": {
+        runLast = null;
+        const toolCallId = toolCallIdOf(entry.event)!;
+        const previous = lastToolUpdate.get(toolCallId);
+        if (previous !== undefined) out[previous] = blank(out[previous]!);
+        lastToolUpdate.set(toolCallId, index);
+        break;
+      }
+      case "tool-end":
+        runLast = null;
+        terminated.add(toolCallIdOf(entry.event)!);
+        break;
+      // Any other event closes the current run: its last member stays live.
+      // This is what keeps text written before a tool call BEFORE the tool row.
+      default:
+        runLast = null;
+        break;
     }
   }
 

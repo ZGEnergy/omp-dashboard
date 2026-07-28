@@ -1,4 +1,4 @@
-import { prepareEventForReplay, utf8ByteLength, type PrepareEventForReplayOptions } from "./prepare-event-for-replay.js";
+import { type PrepareEventForReplayOptions, prepareEventForReplay, utf8ByteLength } from "./prepare-event-for-replay.js";
 import { makeToolStub, stubbedToolEndEvent, type ToolCallStub } from "./replay-projection.js";
 import type { DashboardEvent } from "./types.js";
 
@@ -88,19 +88,23 @@ function resultTextOf(event: DashboardEvent): string {
  * A tool with no `tool_execution_end` in the range is still running and is
  * never degraded. Pure: the input array and its events are never mutated.
  */
-export function applyToolBudget(
-  events: readonly SeqEvent<DashboardEvent>[],
-  budgetBytes: number,
-): ToolBudgetResult {
-  const ceiling = Math.floor(budgetBytes * TOOL_CEILING_FRACTION);
-  const out = events.slice();
+interface LogicalCallEnd {
+  index: number;
+  toolCallId: string;
+  /** The call's ANCHOR — its `tool_execution_start` seq, i.e. its row position. */
+  startSeq: number;
+}
 
-  // Index the terminal event of every logical call, ordered by its ANCHOR (the
-  // start seq), so "oldest-first" means oldest by transcript position.
-  const ends: Array<{ index: number; toolCallId: string; startSeq: number }> = [];
+/**
+ * Index the terminal event of every logical tool call, ordered by ANCHOR so
+ * "oldest-first" means oldest by transcript position rather than by end time
+ * (they differ whenever calls overlap).
+ */
+function indexLogicalCallEnds(events: readonly SeqEvent<DashboardEvent>[]): LogicalCallEnd[] {
+  const ends: LogicalCallEnd[] = [];
   const startSeqById = new Map<string, number>();
-  for (let index = 0; index < out.length; index += 1) {
-    const entry = out[index]!;
+  for (let index = 0; index < events.length; index += 1) {
+    const entry = events[index]!;
     const toolCallId = toolCallIdOf(entry.event);
     if (!toolCallId) continue;
     if (entry.event.eventType === "tool_execution_start" && !startSeqById.has(toolCallId)) {
@@ -110,50 +114,105 @@ export function applyToolBudget(
       ends.push({ index, toolCallId, startSeq: startSeqById.get(toolCallId) ?? entry.seq });
     }
   }
-  ends.sort((a, b) => a.startSeq - b.startSeq);
+  return ends.sort((a, b) => a.startSeq - b.startSeq);
+}
 
-  // Byte totals are tracked INCREMENTALLY. Recomputing them inside the
-  // degradation loop would re-serialize the whole range once per call — O(n^2)
-  // over multi-hundred-KB payloads, which timed out at 500 calls.
+/**
+ * Rewrite one logical call's terminal event at `level`, or return `null` when
+ * it already sits at that rung. Never moves the event: same seq, same
+ * eventType, payload replaced by a stub.
+ */
+function degradeCallEnd(
+  entry: SeqEvent<DashboardEvent>,
+  toolCallId: string,
+  level: ToolCallStub["detailLevel"],
+): { replacement: SeqEvent<DashboardEvent>; wasFull: boolean } | null {
+  const data = entry.event.data as Record<string, unknown> | undefined;
+  const existing = data?.toolStub as ToolCallStub | undefined;
+  if (existing?.detailLevel === level) return null;
+  const raw = existing ? `${existing.head ?? ""}${existing.tail ?? ""}` : resultTextOf(entry.event);
+  const stub = makeToolStub({
+    toolCallId,
+    toolName: typeof data?.toolName === "string" ? data.toolName : (existing?.toolName ?? "unknown"),
+    args: data?.args as Record<string, unknown> | undefined,
+    result: raw,
+    status: data?.isError === true ? "error" : "ok",
+    startedAt: typeof data?.startedAt === "number" ? data.startedAt : entry.event.timestamp,
+    detailLevel: level,
+  });
+  // `raw` is already a slice once a stub exists; keep the ORIGINAL full size so
+  // the UI reports the true unloaded byte count, not the sliced one.
+  stub.fullBytes = existing ? existing.fullBytes : raw.length;
+  return {
+    replacement: { seq: entry.seq, event: stubbedToolEndEvent(entry.event, stub) },
+    wasFull: existing === undefined,
+  };
+}
+
+/**
+ * Split the range's byte cost into tool-tier and chat-tier totals.
+ *
+ * Totals are tracked INCREMENTALLY from here on. Recomputing them inside the
+ * degradation loop would re-serialize the whole range once per call — O(n^2)
+ * over multi-hundred-KB payloads, which timed out at 500 calls.
+ */
+function tallyBytes(events: readonly SeqEvent<DashboardEvent>[]): { toolBytes: number; chatBytes: number } {
   let toolBytes = 0;
   let chatBytes = 0;
-  for (const entry of out) {
+  for (const entry of events) {
     const size = estimateSeqEventBytes(entry);
     if (TOOL_EVENT_TYPES.has(entry.event.eventType)) toolBytes += size;
     else chatBytes += size;
   }
+  return { toolBytes, chatBytes };
+}
 
+/**
+ * One oldest-first degradation pass at a single rung. Mutates `out` in place
+ * (it is already a private copy) and stops as soon as tool bytes fit.
+ */
+function degradePass(
+  out: SeqEvent<DashboardEvent>[],
+  ends: readonly LogicalCallEnd[],
+  level: ToolCallStub["detailLevel"],
+  startingToolBytes: number,
+  ceiling: number,
+): { toolBytes: number; degraded: number; collapsed: number } {
+  let toolBytes = startingToolBytes;
+  let degraded = 0;
+  let collapsed = 0;
+  for (const end of ends) {
+    if (toolBytes <= ceiling) break;
+    const entry = out[end.index]!;
+    const result = degradeCallEnd(entry, end.toolCallId, level);
+    if (!result) continue;
+    toolBytes += estimateSeqEventBytes(result.replacement) - estimateSeqEventBytes(entry);
+    out[end.index] = result.replacement;
+    if (result.wasFull) degraded += 1;
+    if (level === "metadata") collapsed += 1;
+  }
+  return { toolBytes, degraded, collapsed };
+}
+
+export function applyToolBudget(
+  events: readonly SeqEvent<DashboardEvent>[],
+  budgetBytes: number,
+): ToolBudgetResult {
+  const ceiling = Math.floor(budgetBytes * TOOL_CEILING_FRACTION);
+  const out = events.slice();
+  const ends = indexLogicalCallEnds(out);
+  const { toolBytes: initialToolBytes, chatBytes } = tallyBytes(out);
+
+  let toolBytes = initialToolBytes;
   let degraded = 0;
   let collapsed = 0;
   // Two passes, oldest-first. Pass 1 slices; pass 2 collapses to metadata only
   // where slicing alone left tool bytes above the ceiling.
   for (const level of ["sliced", "metadata"] as const) {
-    for (const end of ends) {
-      if (toolBytes <= ceiling) break;
-      const entry = out[end.index]!;
-      const data = entry.event.data as Record<string, unknown> | undefined;
-      const existing = data?.toolStub as ToolCallStub | undefined;
-      if (existing?.detailLevel === level) continue;
-      const raw = existing ? `${existing.head ?? ""}${existing.tail ?? ""}` : resultTextOf(entry.event);
-      // `raw` is already a slice once a stub exists; keep the ORIGINAL full size
-      // so the UI reports the true unloaded byte count, not the sliced one.
-      const fullBytes = existing ? existing.fullBytes : raw.length;
-      const stub = makeToolStub({
-        toolCallId: end.toolCallId,
-        toolName: typeof data?.toolName === "string" ? data.toolName : (existing?.toolName ?? "unknown"),
-        args: data?.args as Record<string, unknown> | undefined,
-        result: raw,
-        status: data?.isError === true ? "error" : "ok",
-        startedAt: typeof data?.startedAt === "number" ? data.startedAt : entry.event.timestamp,
-        detailLevel: level,
-      });
-      stub.fullBytes = fullBytes;
-      const replacement = { seq: entry.seq, event: stubbedToolEndEvent(entry.event, stub) };
-      toolBytes += estimateSeqEventBytes(replacement) - estimateSeqEventBytes(entry);
-      out[end.index] = replacement;
-      if (!existing) degraded += 1;
-      if (level === "metadata") collapsed += 1;
-    }
+    const pass = degradePass(out, ends, level, toolBytes, ceiling);
+    toolBytes = pass.toolBytes;
+    degraded += pass.degraded;
+    collapsed += pass.collapsed;
   }
 
   return { events: out, toolBytes, chatBytes, degraded, collapsed };
@@ -353,7 +412,7 @@ function compactPreparedSelection(
     remaining -= estimateSeqEventBytes(compactedEntry);
   }
 
-  let bytes = compacted.reduce((total, entry) => total + estimateSeqEventBytes(entry), 0);
+  const bytes = compacted.reduce((total, entry) => total + estimateSeqEventBytes(entry), 0);
   if (bytes > budget) {
     const minimal = compacted.map((entry) => ({
       seq: entry.seq,

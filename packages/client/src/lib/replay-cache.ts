@@ -37,8 +37,11 @@ import { DEFAULT_REPLAY_RETENTION_BYTES } from "./replay-retention.js";
 /** Bump on any persisted-shape change → all entries invalidate (full replay).
  *  v2: over-budget put trims to newest-by-byte-budget instead of drop-all.
  *  v3: server-scoped entry shape (key, serverEpoch, sourceGeneration, minSeq, window
- *      metadata, prepared suffix) + IDB store keyed by the composite `key`. */
-export const REPLAY_CACHE_SCHEMA_VERSION = 3;
+ *      metadata, prepared suffix) + IDB store keyed by the composite `key`.
+ *  v4: tool-stub projection — cached entries predate `data.toolStub` and may
+ *      carry residue from the reverted PR #102. Discarded; affected sessions
+ *      re-hydrate. See change: hydration-tool-stub-projection. */
+export const REPLAY_CACHE_SCHEMA_VERSION = 4;
 
 const DB_NAME = "pi-dashboard-replay-cache";
 const STORE = "sessions";
