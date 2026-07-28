@@ -117,7 +117,27 @@ function toolCallIdOf(event: DashboardEvent): string | undefined {
  * creates the tool row. Everything else passes through untouched. Output seqs
  * equal input seqs. Pure: the input array and its events are never mutated.
  */
-type EventClass = "tool-only-shell" | "text-run-member" | "tool-progress" | "tool-end" | "other";
+type EventClass =
+  | "tool-only-shell"
+  | "thinking-delta"
+  | "text-run-member"
+  | "assistant-message-end"
+  | "tool-progress"
+  | "tool-end"
+  | "other";
+
+/** A `message_update` carrying an incremental thinking delta rather than text. */
+function isThinkingDelta(event: DashboardEvent): boolean {
+  if (event.eventType !== "message_update") return false;
+  const assistantEvent = (event.data as { assistantMessageEvent?: { type?: unknown } } | undefined)
+    ?.assistantMessageEvent;
+  return typeof assistantEvent?.type === "string" && assistantEvent.type.startsWith("thinking_");
+}
+
+function isAssistantMessageEnd(event: DashboardEvent): boolean {
+  if (event.eventType !== "message_end") return false;
+  return (event.data as { message?: { role?: unknown } } | undefined)?.message?.role === "assistant";
+}
 
 /** Single classification point for the coalescing rules — order matters. */
 function classify(event: DashboardEvent): EventClass {
@@ -125,11 +145,53 @@ function classify(event: DashboardEvent): EventClass {
   if ((type === "message_update" || type === "message_end") && isToolOnlyAssistantMessage(event)) {
     return "tool-only-shell";
   }
+  if (isThinkingDelta(event)) return "thinking-delta";
   if (isAssistantTextUpdate(event)) return "text-run-member";
+  if (isAssistantMessageEnd(event)) return "assistant-message-end";
   if (!toolCallIdOf(event)) return "other";
   if (type === "tool_execution_update") return "tool-progress";
   if (type === "tool_execution_end") return "tool-end";
   return "other";
+}
+
+/**
+ * Empty a tool-only assistant shell's `content` while keeping the message
+ * envelope (`role`, `id`) intact.
+ *
+ * The bytes worth shedding are all in `content` — duplicated `toolCall` parts
+ * carrying full tool args. The envelope is what the reducer reads to decide
+ * turn boundaries: a fully blanked assistant `message_end` loses its
+ * `message.role`, which suppresses the `turnSeparator` row and the
+ * `streamingTextFlushed` reset. That is a rendered-output change, so the
+ * ordering invariant forbids it — the property test's `tool-only-shell`
+ * scenario catches exactly this.
+ */
+function emptyToolOnlyShell(entry: SeqEvent<DashboardEvent>): SeqEvent<DashboardEvent> {
+  const data = (entry.event.data ?? {}) as Record<string, unknown>;
+  const message = data.message as Record<string, unknown> | undefined;
+  if (!message) return blank(entry);
+  return {
+    seq: entry.seq,
+    event: {
+      ...entry.event,
+      data: { ...data, message: { ...message, content: [] } },
+    } as unknown as DashboardEvent,
+  };
+}
+
+/**
+ * Drop the duplicate cumulative assistant snapshot a thinking delta carries.
+ *
+ * The delta's own incremental semantics live in `assistantMessageEvent`; the
+ * `message` field alongside it repeats the whole assistant text on every delta,
+ * so a long reasoning turn costs O(N x length) for content the run's surviving
+ * text update already carries.
+ */
+function withoutMessageSnapshot(entry: SeqEvent<DashboardEvent>): SeqEvent<DashboardEvent> {
+  const data = entry.event.data as Record<string, unknown> | undefined;
+  if (!data || data.message === undefined) return entry;
+  const { message: _dropped, ...rest } = data;
+  return { seq: entry.seq, event: { ...entry.event, data: rest } as unknown as DashboardEvent };
 }
 
 export function coalesceProjection(events: readonly SeqEvent<DashboardEvent>[]): SeqEvent<DashboardEvent>[] {
@@ -147,12 +209,27 @@ export function coalesceProjection(events: readonly SeqEvent<DashboardEvent>[]):
       // around. Applies to `message_end` too: its canonical content is the
       // tool events themselves.
       case "tool-only-shell":
-        out[index] = blank(entry);
+        out[index] = emptyToolOnlyShell(entry);
+        break;
+      // A thinking delta keeps its incremental payload but sheds the duplicate
+      // assistant snapshot. It does NOT close the text run: it renders as
+      // reasoning, not as prose, so coalescing across it cannot move text
+      // relative to a tool row.
+      case "thinking-delta":
+        out[index] = withoutMessageSnapshot(entry);
         break;
       // Rule 1: a run member supersedes the previous one (cumulative content).
       case "text-run-member":
         if (runLast !== null) out[runLast] = blank(out[runLast]!);
         runLast = index;
+        break;
+      // An assistant `message_end` carries the turn's canonical content, so the
+      // last cumulative update before it is redundant. Blanking it is safe: the
+      // update only ever set `streamingText`, which this event flushes into the
+      // same row at the same position.
+      case "assistant-message-end":
+        if (runLast !== null) out[runLast] = blank(out[runLast]!);
+        runLast = null;
         break;
       // Rule 2: progress updates are superseded within a call.
       case "tool-progress": {
@@ -235,6 +312,11 @@ export function makeToolStub(input: {
  * position it would have without the projection.
  */
 export function stubbedToolEndEvent(event: DashboardEvent, stub: ToolCallStub): DashboardEvent {
-  const { result: _dropped, ...rest } = (event.data ?? {}) as Record<string, unknown>;
+  // `args` is dropped alongside `result`. A Write/Edit `tool_execution_end`
+  // carries the whole written file in `args.content`, so keeping it would let a
+  // multi-MB call sail past the tool ceiling with its payload "degraded" — the
+  // exact memory profile #101 is about. The stub's `argsSummary` is what the
+  // row renders, so nothing visible is lost.
+  const { result: _result, args: _args, ...rest } = (event.data ?? {}) as Record<string, unknown>;
   return { ...event, data: { ...rest, toolStub: stub } } as unknown as DashboardEvent;
 }

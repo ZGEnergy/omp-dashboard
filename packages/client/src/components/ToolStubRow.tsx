@@ -35,7 +35,20 @@ export function ToolStubRow({
       <div className="text-[var(--text-secondary)] font-mono">{stub.argsSummary}</div>
       {cached ? (
         <>
-          <pre className="whitespace-pre-wrap text-[var(--text-tertiary)]">{cached.payload}</pre>
+          {/*
+            Height-bounded on purpose. A fetched payload lives in the payload
+            controller, not on the `ChatMessage`, so `computeRowTextChars` cannot
+            see it — an unbounded <pre> could swap a ~20 KB estimate for up to
+            2 MiB of real content and jump the virtualizer's scroll position.
+            Capping the box keeps the pre-measure estimate honest.
+            See change: hydration-tool-stub-projection.
+          */}
+          <pre
+            data-testid="tool-stub-payload"
+            className="whitespace-pre-wrap text-[var(--text-tertiary)] max-h-[480px] overflow-auto"
+          >
+            {cached.payload}
+          </pre>
           {cached.truncated ? (
             <span data-testid="tool-stub-truncated" className="text-[var(--text-tertiary)]">
               response capped — open raw for the rest

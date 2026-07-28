@@ -15,7 +15,12 @@ export type SessionScenario =
   | "no-message-end"
   | "thinking-blocks"
   | "subagent-burst"
-  | "aborted-turn";
+  | "aborted-turn"
+  | "tool-only-shell"
+  | "overlapping-calls"
+  | "running-call"
+  | "end-without-start"
+  | "many-progress-updates";
 
 /** Deterministic PRNG — `Date.now()`/`Math.random()` would make fixtures irreproducible. */
 function rng(seed: number): () => number {
@@ -54,9 +59,11 @@ function streamText(b: Builder, messageId: string, chunks: string[]): string {
   return acc;
 }
 
-function toolCall(b: Builder, toolCallId: string, toolName: string, resultBytes: number): void {
+function toolCall(b: Builder, toolCallId: string, toolName: string, resultBytes: number, updates = 1): void {
   push(b, "tool_execution_start", { toolCallId, toolName, args: { path: `src/${toolCallId}.ts` } });
-  push(b, "tool_execution_update", { toolCallId, partialResult: "x".repeat(Math.floor(resultBytes / 4)) });
+  for (let i = 0; i < updates; i += 1) {
+    push(b, "tool_execution_update", { toolCallId, partialResult: "x".repeat(Math.floor(resultBytes / 4)) });
+  }
   push(b, "tool_execution_end", { toolCallId, toolName, result: "x".repeat(resultBytes), isError: false });
 }
 
@@ -131,6 +138,55 @@ export function generateSession(scenario: SessionScenario, seed: number): SeqEve
       push(b, "agent_end", { aborted: true });
       break;
     }
+    // The bridge emits a full assistant snapshot per streamed delta. During a
+    // tool-heavy turn those shells carry only `toolCall` parts and duplicate
+    // large tool args — the case coalescing Rule 3 blanks.
+    case "tool-only-shell": {
+      push(b, "message_update", {
+        message: { id: "m1", role: "assistant", content: [{ type: "toolCall", toolCallId: "t1", args: { body: "y".repeat(2000) } }] },
+      });
+      toolCall(b, "t1", "Read", size());
+      push(b, "message_end", {
+        message: { id: "m1", role: "assistant", content: [{ type: "toolCall", toolCallId: "t1" }] },
+      });
+      break;
+    }
+    // Two calls in flight at once, ending in the opposite order they started —
+    // anchor order (start seq) and end order differ.
+    case "overlapping-calls": {
+      const text = streamText(b, "m1", ["Two at once."]);
+      push(b, "tool_execution_start", { toolCallId: "a", toolName: "Read", args: { path: "a.ts" } });
+      push(b, "tool_execution_start", { toolCallId: "bb", toolName: "Read", args: { path: "b.ts" } });
+      push(b, "tool_execution_end", { toolCallId: "bb", toolName: "Read", result: "x".repeat(size()) });
+      push(b, "tool_execution_end", { toolCallId: "a", toolName: "Read", result: "x".repeat(size()) });
+      push(b, "message_end", { message: { id: "m1", role: "assistant", content: [{ type: "text", text }] } });
+      break;
+    }
+    // A call with no terminal event in range — must never be degraded.
+    case "running-call": {
+      streamText(b, "m1", ["Running a long one."]);
+      push(b, "tool_execution_start", { toolCallId: "live", toolName: "Bash", args: { command: "sleep 60" } });
+      push(b, "tool_execution_update", { toolCallId: "live", partialResult: "partial output" });
+      break;
+    }
+    // A terminal event whose start seq fell below the page boundary — routine
+    // during older paging.
+    case "end-without-start": {
+      push(b, "tool_execution_end", { toolCallId: "orphan", toolName: "Read", result: "x".repeat(size()) });
+      const text = streamText(b, "m1", ["Continuing after an orphan end."]);
+      toolCall(b, "t1", "Read", size());
+      push(b, "message_end", { message: { id: "m1", role: "assistant", content: [{ type: "text", text }] } });
+      break;
+    }
+    // Many progress updates per call, so Rule 2 (blank superseded progress) is
+    // actually exercised rather than vacuous.
+    case "many-progress-updates": {
+      const text = streamText(b, "m1", ["Streaming a long tool."]);
+      toolCall(b, "t1", "Bash", size(), 8);
+      toolCall(b, "t2", "Bash", size(), 5);
+      push(b, "message_end", { message: { id: "m1", role: "assistant", content: [{ type: "text", text }] } });
+      break;
+    }
   }
   return b.events;
 }
@@ -145,4 +201,9 @@ export const ALL_SCENARIOS: SessionScenario[] = [
   "thinking-blocks",
   "subagent-burst",
   "aborted-turn",
+  "tool-only-shell",
+  "overlapping-calls",
+  "running-call",
+  "end-without-start",
+  "many-progress-updates",
 ];

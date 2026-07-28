@@ -68,7 +68,19 @@ describe("coalesceProjection", () => {
     expect(isBlanked(out[2]!.event)).toBe(false); // newest progress is all the UI has
   });
 
-  it("does not treat a thinking delta as a text-run member", () => {
+  it("keeps a thinking delta's incremental payload but drops its duplicate text snapshot", () => {
+    const out = coalesceProjection([
+      ev(1, "message_update", {
+        message: { id: "m1", role: "assistant", content: [{ type: "text", text: "long prose" }] },
+        assistantMessageEvent: { type: "thinking_delta", text: "hmm" },
+      }),
+    ]);
+    const data = out[0]!.event.data as Record<string, unknown>;
+    expect(data.assistantMessageEvent).toEqual({ type: "thinking_delta", text: "hmm" });
+    expect(data.message).toBeUndefined();
+  });
+
+  it("a thinking delta does not split a text run — it renders as reasoning, not prose", () => {
     const out = coalesceProjection([
       textUpdate(1, "a"),
       ev(2, "message_update", {
@@ -77,12 +89,58 @@ describe("coalesceProjection", () => {
       }),
       textUpdate(3, "ab"),
     ]);
-    expect(isBlanked(out[0]!.event)).toBe(false); // run split by the thinking delta
-    expect(isBlanked(out[1]!.event)).toBe(false);
+    expect(isBlanked(out[0]!.event)).toBe(true); // superseded by seq 3
     expect(isBlanked(out[2]!.event)).toBe(false);
   });
 
-  it("blanks tool-only assistant shells, which duplicate large tool args", () => {
+  it("an assistant message_end supersedes the last cumulative update before it", () => {
+    const out = coalesceProjection([
+      textUpdate(1, "a"),
+      textUpdate(2, "ab"),
+      ev(3, "message_end", { message: { id: "m1", role: "assistant", content: [{ type: "text", text: "ab" }] } }),
+    ]);
+    expect(isBlanked(out[0]!.event)).toBe(true);
+    expect(isBlanked(out[1]!.event)).toBe(true); // canonical content is on the end event
+    expect(isBlanked(out[2]!.event)).toBe(false);
+  });
+
+  it("a USER message_end does not supersede an assistant text run", () => {
+    const out = coalesceProjection([
+      textUpdate(1, "a"),
+      ev(2, "message_end", { message: { role: "user", content: [{ type: "text", text: "next prompt" }] } }),
+    ]);
+    expect(isBlanked(out[0]!.event)).toBe(false);
+  });
+
+  it("drops args alongside result when stubbing, so huge tool args cannot survive", () => {
+    const out = coalesceProjection([
+      ev(1, "tool_execution_start", { toolCallId: "t1", toolName: "Write" }),
+      ev(2, "tool_execution_end", {
+        toolCallId: "t1",
+        toolName: "Write",
+        args: { content: "A".repeat(1000) },
+        result: "ok",
+      }),
+    ]);
+    // Coalescing alone leaves args intact; only stubbing drops them.
+    expect((out[1]!.event.data as Record<string, unknown>).args).toBeDefined();
+    const stub = makeToolStub({
+      toolCallId: "t1",
+      toolName: "Write",
+      args: { content: "A".repeat(1000) },
+      result: "ok",
+      status: "ok",
+      startedAt: 1,
+      detailLevel: "metadata",
+    });
+    const stubbed = stubbedToolEndEvent(out[1]!.event, stub);
+    const data = stubbed.data as Record<string, unknown>;
+    expect(data.args).toBeUndefined();
+    expect(data.result).toBeUndefined();
+    expect((data.toolStub as { argsSummary: string }).argsSummary).toContain("Write");
+  });
+
+  it("empties tool-only assistant shells, which duplicate large tool args", () => {
     const shell = (seq: number) =>
       ev(seq, "message_update", {
         message: {
@@ -92,8 +150,26 @@ describe("coalesceProjection", () => {
         },
       });
     const out = coalesceProjection([shell(1), shell(2)]);
-    expect(isBlanked(out[0]!.event)).toBe(true);
-    expect(isBlanked(out[1]!.event)).toBe(true);
+    for (const entry of out) {
+      const message = (entry.event.data as { message: { role: string; id: string; content: unknown[] } }).message;
+      expect(message.content).toEqual([]);
+      // Envelope survives: a fully blanked assistant `message_end` would lose
+      // `role` and suppress the reducer's turnSeparator — a rendered-output
+      // change the ordering invariant forbids.
+      expect(message.role).toBe("assistant");
+      expect(message.id).toBe("m1");
+    }
+    expect(JSON.stringify(out).length).toBeLessThan(400);
+  });
+
+  it("keeps the turn envelope on a tool-only assistant message_end", () => {
+    const out = coalesceProjection([
+      ev(1, "message_end", {
+        message: { id: "m1", role: "assistant", content: [{ type: "toolCall", toolCallId: "t1" }] },
+      }),
+    ]);
+    const message = (out[0]!.event.data as { message: { role: string } }).message;
+    expect(message.role).toBe("assistant");
   });
 
   it("does not blank an assistant shell that also carries text", () => {
@@ -118,7 +194,7 @@ describe("coalesceProjection", () => {
       textUpdate(3, "ab"),
     ]);
     expect(isBlanked(out[0]!.event)).toBe(true); // superseded by seq 3
-    expect(isBlanked(out[1]!.event)).toBe(true); // the shell itself
+    expect((out[1]!.event.data as { message: { content: unknown[] } }).message.content).toEqual([]);
     expect(isBlanked(out[2]!.event)).toBe(false);
   });
 

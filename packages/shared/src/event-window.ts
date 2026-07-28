@@ -186,7 +186,12 @@ function degradePass(
     const entry = out[end.index]!;
     const result = degradeCallEnd(entry, end.toolCallId, level);
     if (!result) continue;
-    toolBytes += estimateSeqEventBytes(result.replacement) - estimateSeqEventBytes(entry);
+    const delta = estimateSeqEventBytes(result.replacement) - estimateSeqEventBytes(entry);
+    // A stub envelope costs ~150-250 B, so degrading a call whose payload is
+    // already smaller than that GROWS the range while destroying its output —
+    // strictly worse on both axes. Leave those alone.
+    if (delta >= 0) continue;
+    toolBytes += delta;
     out[end.index] = result.replacement;
     if (result.wasFull) degraded += 1;
     if (level === "metadata") collapsed += 1;

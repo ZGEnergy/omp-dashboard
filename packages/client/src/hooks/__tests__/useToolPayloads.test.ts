@@ -4,7 +4,7 @@ import type {
 } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { useToolPayloads } from "../useToolPayloads.js";
+import { TOOL_PAYLOAD_TIMEOUT_MS, useToolPayloads } from "../useToolPayloads.js";
 
 function harness(sessionId: string | null = "s1") {
   const sent: BrowserToServerMessage[] = [];
@@ -158,5 +158,40 @@ describe("useToolPayloads", () => {
     const h = harness(null);
     act(() => h.result.current.fetch("t1"));
     expect(h.sent).toHaveLength(0);
+  });
+
+  it("REGRESSION: a response that never arrives releases the row instead of stranding it", () => {
+    vi.useFakeTimers();
+    try {
+      const h = harness();
+      act(() => h.result.current.fetch("t1"));
+      expect(h.result.current.isLoading("t1")).toBe(true);
+      act(() => {
+        vi.advanceTimersByTime(TOOL_PAYLOAD_TIMEOUT_MS + 1);
+      });
+      expect(h.result.current.isLoading("t1")).toBe(false);
+      expect(h.result.current.isError("t1")).toBe(true);
+      // And the in-flight guard must not block the retry.
+      act(() => h.result.current.fetch("t1"));
+      expect(h.sent).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a timed-out request cannot land later and clobber the row", () => {
+    vi.useFakeTimers();
+    try {
+      const h = harness();
+      act(() => h.result.current.fetch("t1"));
+      const stale = h.lastRequestId()!;
+      act(() => {
+        vi.advanceTimersByTime(TOOL_PAYLOAD_TIMEOUT_MS + 1);
+      });
+      h.deliver({ type: "tool_payload", sessionId: "s1", requestId: stale, toolCallId: "t1", payload: "late" });
+      expect(h.result.current.get("t1")).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

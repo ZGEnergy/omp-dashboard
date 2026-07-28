@@ -402,7 +402,15 @@ function readSubagentDetails(
   return out;
 }
 
-function warnMalformedToolEvent(eventType: string): void {
+function warnMalformedToolEvent(eventType: string, data: Record<string, unknown> | undefined): void {
+  // A tool event BLANKED by the replay projection legitimately arrives with an
+  // empty `data` — it exists only to hold its seq so the range stays
+  // contiguous. That is expected, not malformed, and a tool-heavy hydration
+  // blanks hundreds of progress updates; warning on each would flood the
+  // console. Only a genuinely malformed event (non-empty data, absent
+  // toolCallId) is worth reporting.
+  // See change: hydration-tool-stub-projection.
+  if (data && Object.keys(data).length === 0) return;
   console.warn(`[event-reducer] ${eventType} ignored: missing non-empty toolCallId`);
 }
 
@@ -1935,7 +1943,7 @@ export function reduceEvent(
     case "tool_execution_update": {
       const toolCallId = data.toolCallId;
       if (typeof toolCallId !== "string" || toolCallId.length === 0) {
-        warnMalformedToolEvent("tool_execution_update");
+        warnMalformedToolEvent("tool_execution_update", data);
         break;
       }
       const existingTool = next.toolCalls.get(toolCallId);
@@ -2020,7 +2028,7 @@ export function reduceEvent(
     case "tool_execution_end": {
       const toolCallId = data.toolCallId;
       if (typeof toolCallId !== "string" || toolCallId.length === 0) {
-        warnMalformedToolEvent("tool_execution_end");
+        warnMalformedToolEvent("tool_execution_end", data);
         break;
       }
       const healedBy = data.healedBy as string | undefined;

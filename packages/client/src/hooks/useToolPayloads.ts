@@ -20,6 +20,12 @@ import type {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type CachedPayload, ToolPayloadCache } from "../lib/tool-payload-cache.js";
 
+/**
+ * How long a `fetch_tool_payload` may stay in flight before the row is released
+ * back to a retryable error state.
+ */
+export const TOOL_PAYLOAD_TIMEOUT_MS = 30_000;
+
 /** Read-side view a transcript row needs to render one degraded tool call. */
 export interface ToolPayloadController {
   get(toolCallId: string): CachedPayload | undefined;
@@ -84,6 +90,19 @@ export function useToolPayloads(
       const requestId = crypto.randomUUID();
       pendingRef.current.set(requestId, toolCallId);
       setLoading((prev) => new Set(prev).add(toolCallId));
+      // Without a timeout a response that never arrives (server restart mid
+      // fetch, dropped frame) strands the row in `loading` forever, and the
+      // in-flight guard above then makes every retry click a no-op.
+      window.setTimeout(() => {
+        if (!pendingRef.current.delete(requestId)) return;
+        setLoading((prev) => {
+          if (!prev.has(toolCallId)) return prev;
+          const next = new Set(prev);
+          next.delete(toolCallId);
+          return next;
+        });
+        setErrors((prev) => new Set(prev).add(toolCallId));
+      }, TOOL_PAYLOAD_TIMEOUT_MS);
       setErrors((prev) => {
         if (!prev.has(toolCallId)) return prev;
         const next = new Set(prev);

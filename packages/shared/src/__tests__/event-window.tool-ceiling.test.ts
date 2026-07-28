@@ -130,4 +130,42 @@ describe("applyToolBudget", () => {
     applyToolBudget(input, BUDGET);
     expect(JSON.stringify(input)).toEqual(snapshot);
   });
+
+  it("REGRESSION: never grows the range — a payload smaller than a stub is left alone", () => {
+    // A stub envelope is ~150-250 B. Degrading 60-byte results once GREW the
+    // range 23% while destroying every result, and still missed the ceiling.
+    const input = Array.from({ length: 1500 }, (_, i) => toolPair(1 + i * 2, `t${i}`, 60)).flat();
+    const before = input.reduce((sum, e) => sum + JSON.stringify(e).length, 0);
+    const out = applyToolBudget(input, BUDGET);
+    const after = out.events.reduce((sum, e) => sum + JSON.stringify(e).length, 0);
+    expect(after).toBeLessThanOrEqual(before);
+    expect(out.degraded).toBe(0); // nothing to gain, so nothing destroyed
+  });
+
+  it("REGRESSION: strips huge tool args, which otherwise sail past the ceiling", () => {
+    // A Write/Edit `tool_execution_end` carries the whole written file in
+    // `args.content`. Dropping only `result` left tool bytes 10x over ceiling.
+    const input: SeqEvent<DashboardEvent>[] = [
+      chat(1, "hi"),
+      {
+        seq: 2,
+        event: {
+          eventType: "tool_execution_start",
+          timestamp: 2,
+          data: { toolCallId: "w1", toolName: "Write" },
+        } as unknown as DashboardEvent,
+      },
+      {
+        seq: 3,
+        event: {
+          eventType: "tool_execution_end",
+          timestamp: 3,
+          data: { toolCallId: "w1", toolName: "Write", args: { content: "A".repeat(4_000_000) }, result: "ok" },
+        } as unknown as DashboardEvent,
+      },
+    ];
+    const out = applyToolBudget(input, BUDGET);
+    expect(out.toolBytes).toBeLessThanOrEqual(CEILING);
+    expect((out.events[2]!.event.data as Record<string, unknown>).args).toBeUndefined();
+  });
 });

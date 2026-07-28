@@ -113,8 +113,10 @@ import {
 import { openStagingSocket } from "./lib/staging-socket.js";
 import {
   computeChatFloorSeq,
+  computeStubFloorSeq,
   computeToolFloorSeq,
   DEFAULT_CHAT_RETAINED_TURNS,
+  DEFAULT_STUB_TIER_MAX_COUNT,
   DEFAULT_TOOL_TIER_MAX_BYTES,
   DEFAULT_TOOL_TIER_MAX_COUNT,
 } from "./lib/two-tier-floors.js";
@@ -969,8 +971,16 @@ export default function App() {
             chatFloorSeq: computeChatFloorSeq(current.messages, DEFAULT_CHAT_RETAINED_TURNS, vp),
             toolFloorSeq: effToolFloorSeq,
           };
+          // Middle rung of the shared degradation ladder: between the stub
+          // floor and the tool floor a row sheds its payload but keeps its
+          // position and stays re-fetchable, instead of vanishing into an
+          // "N tool calls collapsed" marker. Clamped to the same pin so a
+          // visible/expanded row is never degraded under the user.
+          // See change: hydration-tool-stub-projection.
+          const rawStubFloorSeq = computeStubFloorSeq(current.toolCalls.values(), DEFAULT_STUB_TIER_MAX_COUNT);
+          const stubFloorSeq = vp != null ? Math.min(rawStubFloorSeq, vp) : rawStubFloorSeq;
           const next = new Map(prev);
-          next.set(sessionId, evictBelow(current, floors));
+          next.set(sessionId, evictBelow(current, floors, { stubFloorSeq }));
           return next;
         });
       },

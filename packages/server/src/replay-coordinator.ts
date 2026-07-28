@@ -94,6 +94,15 @@ function replayKindFor(msg: Extract<BrowserToServerMessage, { type: "subscribe" 
  * byte-faithful contiguous prefix of the client's missing range, and legacy
  * `full` mode has no budget to enforce, so neither is degraded.
  *
+ * `fromSeq` is load-bearing for `older`. Degradation is oldest-first against
+ * whatever range it is handed, so budgeting the WHOLE session would spend the
+ * entire tool ceiling on the newest calls — which are not in the older page at
+ * all — and hand every row in the page back as a content-free `metadata` stub
+ * while leaving most of the byte budget unspent. Restricting the source to
+ * `seq < fromSeq` makes "oldest-first" mean oldest *within the page*, so the
+ * newest rows of that page keep the most detail. `cold`+`tail` needs no such
+ * bound: its window IS the tail, so the newest calls are the ones delivered.
+ *
  * Live streaming never reaches this function — `publishLive` sends raw events.
  * See change: hydration-tool-stub-projection.
  */
@@ -102,10 +111,22 @@ export function projectForHydration(
   budgetBytes: number,
   replayKind: ReplayKind,
   mode: "full" | "tail" | undefined,
+  fromSeq?: number,
 ): StoredEvent[] {
   const coalesced = coalesceProjection(events) as StoredEvent[];
-  const budgeted = replayKind === "older" || (replayKind === "cold" && mode === "tail");
-  return budgeted ? (applyToolBudget(coalesced, budgetBytes).events as StoredEvent[]) : coalesced;
+  if (replayKind === "older") {
+    if (fromSeq == null) return coalesced;
+    const page = coalesced.filter((entry) => entry.seq < fromSeq);
+    const budgeted = applyToolBudget(page, budgetBytes).events as StoredEvent[];
+    const bySeq = new Map(budgeted.map((entry) => [entry.seq, entry]));
+    // Splice the budgeted page back over its source range: the caller still
+    // selects from the full coalesced array, and its seq set must not change.
+    return coalesced.map((entry) => bySeq.get(entry.seq) ?? entry);
+  }
+  if (replayKind === "cold" && mode === "tail") {
+    return applyToolBudget(coalesced, budgetBytes).events as StoredEvent[];
+  }
+  return coalesced;
 }
 
 export function createReplayCoordinator(options: ReplayCoordinatorOptions): ReplayCoordinator {
@@ -357,14 +378,14 @@ export function createReplayCoordinator(options: ReplayCoordinatorOptions): Repl
     // Selection spans the whole window budget across as many frames as it
     // needs; a single event is still prepared (and accounted) at frame size.
     const selectionOptions = { maxEventBytes: windowBudget };
-    const raw = projectForHydration(options.store.getEvents(sessionId, 1), budget, request.replayKind, msg.mode);
+    const raw = projectForHydration(options.store.getEvents(sessionId, 1), budget, request.replayKind, msg.mode, msg.fromSeq);
     const retainedRange = options.store.getRetainedRange(sessionId);
     const needsPersistedPaging = retainedRange.historyTruncated && (retainedRange.retainedMinSeq ?? 1) > 1;
     let persistedRaw: StoredEvent[] | undefined;
     if (needsPersistedPaging && (request.replayKind === "older" || (request.replayKind === "cold" && msg.mode === "tail"))) {
       const persisted = await loadPersistedSource(sessionId, ctx);
       if (!requestValid(state, request, ws)) return;
-      if (persisted.ok) persistedRaw = persisted.events ? projectForHydration(persisted.events, budget, request.replayKind, msg.mode) : undefined;
+      if (persisted.ok) persistedRaw = persisted.events ? projectForHydration(persisted.events, budget, request.replayKind, msg.mode, msg.fromSeq) : undefined;
     }
     const snapshotMax = raw.at(-1)?.seq ?? 0;
     for (const [seq, { bytes }] of state.pendingLive) {

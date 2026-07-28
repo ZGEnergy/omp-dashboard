@@ -45,9 +45,55 @@ describe("projectForHydration", () => {
     expect(JSON.stringify(out)).toEqual(JSON.stringify(applyToolBudget(coalesceProjection(source), BUDGET).events));
   });
 
-  it("applies coalesce + budget for older paging", () => {
-    const out = projectForHydration(source, BUDGET, "older", undefined);
-    expect(JSON.stringify(out)).toEqual(JSON.stringify(applyToolBudget(coalesceProjection(source), BUDGET).events));
+  // Regression: the budget must scope to the PAGE, not the whole session.
+  // Degradation is oldest-first, so budgeting the whole session spent the
+  // entire tool ceiling on the newest calls — which are not in the older page
+  // at all — and handed back a page of content-free `metadata` stubs while
+  // leaving ~93% of the byte budget unspent.
+  describe("older paging scopes the budget to the page", () => {
+    const big: StoredEvent[] = [
+      ...Array.from({ length: 300 }, (_, i) => toolPair(1 + i * 2, `t${i}`, 20_000)).flat(),
+    ];
+    const fromSeq = 121; // page back over the oldest 60 calls
+
+    function detailLevels(events: StoredEvent[], onlyBelow: number) {
+      const levels: Record<string, number> = {};
+      for (const entry of events) {
+        if (entry.seq >= onlyBelow) continue;
+        if (entry.event.eventType !== "tool_execution_end") continue;
+        const stub = (entry.event.data as Record<string, unknown>).toolStub as
+          | { detailLevel: string }
+          | undefined;
+        const key = stub?.detailLevel ?? "full";
+        levels[key] = (levels[key] ?? 0) + 1;
+      }
+      return levels;
+    }
+
+    it("does not collapse the whole page to metadata", () => {
+      const out = projectForHydration(big, BUDGET, "older", undefined, fromSeq);
+      const levels = detailLevels(out, fromSeq);
+      // 60 calls x 20 KB is over the 384 KiB ceiling, so some slicing is
+      // expected. What must NOT happen is a total collapse of the page.
+      expect(levels.metadata ?? 0).toBeLessThan(60);
+      expect(Object.keys(levels).length).toBeGreaterThan(0);
+    });
+
+    it("beats whole-session budgeting on retained detail", () => {
+      const paged = detailLevels(projectForHydration(big, BUDGET, "older", undefined, fromSeq), fromSeq);
+      const wholeSession = detailLevels(applyToolBudget(coalesceProjection(big), BUDGET).events as StoredEvent[], fromSeq);
+      expect(paged.metadata ?? 0).toBeLessThan(wholeSession.metadata ?? 0);
+    });
+
+    it("leaves the seq set of the full range untouched", () => {
+      const out = projectForHydration(big, BUDGET, "older", undefined, fromSeq);
+      expect(out.map((e) => e.seq)).toEqual(big.map((e) => e.seq));
+    });
+
+    it("falls back to coalesce-only when fromSeq is absent", () => {
+      const out = projectForHydration(big, BUDGET, "older", undefined);
+      expect(JSON.stringify(out)).toEqual(JSON.stringify(coalesceProjection(big)));
+    });
   });
 
   it("applies coalesce ONLY for delta — live catch-up keeps full payloads", () => {
