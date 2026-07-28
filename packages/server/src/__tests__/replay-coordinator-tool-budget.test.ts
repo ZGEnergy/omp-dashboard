@@ -70,19 +70,38 @@ describe("projectForHydration", () => {
       return levels;
     }
 
-    it("does not collapse the whole page to metadata", () => {
+    // REVERSAL OF A PRIOR DECISION. #104 required an older page to RETAIN tool
+    // detail ("what must NOT happen is a total collapse of the page"), on the
+    // reasoning that a page of content-free stubs wastes the byte budget.
+    //
+    // Measured against a real 19,677-event session, that policy cost ~1,300
+    // events per 1.5 MiB page: 15 round trips and ~21 MiB to reach the first
+    // user prompt, which in practice meant the start of a long session was
+    // unreachable. Depth per page is worth more here than detail on history the
+    // user is scrolling past, and no detail is actually lost — every stub
+    // re-inflates on click via the `toolCallId` fetch path #104 itself added.
+    //
+    // See change: cheap-older-pages.
+    it("collapses the whole page to metadata so one page reaches much further back", () => {
       const out = projectForHydration(big, BUDGET, "older", undefined, fromSeq);
       const levels = detailLevels(out, fromSeq);
-      // 60 calls x 20 KB is over the 384 KiB ceiling, so some slicing is
-      // expected. What must NOT happen is a total collapse of the page.
-      expect(levels.metadata ?? 0).toBeLessThan(60);
-      expect(Object.keys(levels).length).toBeGreaterThan(0);
+      expect(levels.full ?? 0).toBe(0);
+      expect(levels.sliced ?? 0).toBe(0);
+      expect(levels.metadata).toBe(60);
     });
 
-    it("beats whole-session budgeting on retained detail", () => {
-      const paged = detailLevels(projectForHydration(big, BUDGET, "older", undefined, fromSeq), fromSeq);
-      const wholeSession = detailLevels(applyToolBudget(coalesceProjection(big), BUDGET).events as StoredEvent[], fromSeq);
-      expect(paged.metadata ?? 0).toBeLessThan(wholeSession.metadata ?? 0);
+    // The density win itself is measured in replay-coordinator-older-depth.test.ts,
+    // on a fixture small enough that the live tail legitimately keeps full
+    // payloads — here everything is over the ceiling either way, so the two
+    // policies coincide below `fromSeq` and the comparison proves nothing.
+
+    it("stubs ONLY the page — events at or above fromSeq are untouched", () => {
+      // The `fromSeq` restriction still matters: it bounds which events the
+      // page owns, so paging back never degrades the tail already on screen.
+      const out = projectForHydration(big, BUDGET, "older", undefined, fromSeq);
+      const coalesced = coalesceProjection(big) as StoredEvent[];
+      const above = (events: StoredEvent[]) => events.filter((e) => e.seq >= fromSeq);
+      expect(JSON.stringify(above(out))).toEqual(JSON.stringify(above(coalesced)));
     });
 
     it("leaves the seq set of the full range untouched", () => {
