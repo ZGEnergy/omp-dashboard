@@ -34,6 +34,7 @@ import { useDisplayPrefs } from "../hooks/useDisplayPrefs.js";
 import { useFxVisibility } from "../hooks/useFxVisibility.js";
 import type { InflightBashTool } from "../hooks/useInflightBashTools.js";
 import { useMobile } from "../hooks/useMobile.js";
+import { useForkPending } from "../lib/ForkPendingContext.js";
 import { formatRelativeTime, formatTokens } from "../lib/format.js";
 import { refreshGitStatus, setCachedGitStatus, useGitStatus } from "../lib/git-status-cache.js";
 import { t as i18nT } from "../lib/i18n";
@@ -516,6 +517,8 @@ export function SessionCard({
   const canRename = session.status !== "ended" && !!onRename;
   const isAlive = session.status !== "ended";
   const isMobile = useMobile();
+  // Fork feedback + duplicate guard. See change: fork-action-opens-an-empty-chat.
+  const forkPending = useForkPending()(session.id);
   const prefs = useDisplayPrefs(session.id);
   // Suppress purple `card-input-stripes` when a widget-bar slot owns the
   // pending prompt. Plugin-agnostic. See change: fix-flows-plugin-polish (B1).
@@ -830,11 +833,15 @@ export function SessionCard({
             )}
             <button
               onClick={(e) => { e.stopPropagation(); onResume("fork"); }}
-              disabled={session.resuming || session.cwdMissing === true}
+              disabled={session.resuming || forkPending || session.cwdMissing === true}
               className="text-[9px] px-1 py-px rounded border border-blue-500/30 text-blue-400 hover:bg-blue-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
-              title={session.cwdMissing ? i18nT("session.cwdMissing", undefined, "session's directory no longer exists") : i18nT("session.forkTitle", undefined, "Fork session (new session from this point)")}
+              title={session.cwdMissing
+                ? i18nT("session.cwdMissing", undefined, "session's directory no longer exists")
+                : forkPending
+                  ? i18nT("session.forking", undefined, "Forking…")
+                  : i18nT("session.forkTitle", undefined, "Fork session (new session from this point)")}
             >
-              <Icon path={mdiSourceFork} size={0.35} className="inline mr-px" />{i18nT("session.fork", undefined, "Fork")}
+              <Icon path={forkPending ? mdiLoading : mdiSourceFork} size={0.35} className={`inline mr-px${forkPending ? " animate-spin" : ""}`} />{i18nT("session.fork", undefined, "Fork")}
             </button>
           </>
         )}

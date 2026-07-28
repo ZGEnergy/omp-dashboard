@@ -93,6 +93,84 @@ describe("createBranchedSessionFile", () => {
 
     expect(loadSessionEntries(sessionFile)).toEqual([message]);
   });
+
+  // Issue #107 / D2: every current-format pi session file writes the `title`
+  // record BEFORE the `session` header. The old index-0 assertion made
+  // entry-scoped fork throw on every healthy session.
+  describe("title-first (current pi format)", () => {
+    const TITLE_LINE = {
+      type: "title",
+      v: 1,
+      title: "build calibration PRs",
+      source: "user",
+      updatedAt: "2026-07-27T21:55:12.591Z",
+      pad: " ".repeat(174),
+    };
+
+    function writeTitleFirstSession(): string {
+      return writeSession([
+        TITLE_LINE,
+        { type: "session", version: 3, id: "sess-1", timestamp: "2026-01-01T00:00:00Z", cwd: "/tmp" },
+        { type: "message", id: "e1", parentId: null, message: { role: "user", content: "Hello" } },
+        { type: "message", id: "e2", parentId: "e1", message: { role: "assistant", content: "Hi" } },
+        { type: "message", id: "e3", parentId: "e2", message: { role: "user", content: "More" } },
+      ]);
+    }
+
+    it("branches a title-first file at a mid-transcript entry", () => {
+      const sessionFile = writeTitleFirstSession();
+
+      const newPath = createBranchedSessionFile(sessionFile, "e2");
+      const lines = readFileSync(newPath, "utf-8").trim().split("\n").map(l => JSON.parse(l));
+
+      // preamble title + new session header + e1 + e2
+      expect(lines).toHaveLength(4);
+      expect(lines[0].type).toBe("title");
+      expect(lines[1].type).toBe("session");
+      expect(lines[2].id).toBe("e1");
+      expect(lines[2].parentId).toBeNull();
+      expect(lines[3].id).toBe("e2");
+      expect(lines[3].parentId).toBe("e1");
+    });
+
+    it("preserves the title preamble line verbatim, including its `pad` slot", () => {
+      const sessionFile = writeTitleFirstSession();
+      const originalFirstLine = readFileSync(sessionFile, "utf-8").split("\n")[0];
+
+      const newPath = createBranchedSessionFile(sessionFile, "e1");
+      const newLines = readFileSync(newPath, "utf-8").trim().split("\n");
+
+      expect(newLines[0]).toBe(originalFirstLine);
+      expect(JSON.parse(newLines[0]).pad).toBe(" ".repeat(174));
+      const header = JSON.parse(newLines[1]);
+      expect(header.type).toBe("session");
+      expect(header.parentSession).toBe(sessionFile);
+      expect(header.id).not.toBe("sess-1");
+    });
+
+    it("still branches a legacy session-first file (back-compat)", () => {
+      const sessionFile = writeSession([
+        { type: "session", id: "sess-1", timestamp: "2025-01-01T00:00:00Z", cwd: "/tmp" },
+        { type: "message", id: "e1", parentId: null, message: { role: "user", content: "Hello" } },
+      ]);
+
+      const lines = readFileSync(createBranchedSessionFile(sessionFile, "e1"), "utf-8")
+        .trim().split("\n").map(l => JSON.parse(l));
+
+      expect(lines).toHaveLength(2);
+      expect(lines[0].type).toBe("session");
+      expect(lines[1].id).toBe("e1");
+    });
+
+    it("throws when no session record exists at any index", () => {
+      const sessionFile = writeSession([
+        TITLE_LINE,
+        { type: "message", id: "e1", parentId: null, message: { role: "user", content: "Hello" } },
+      ]);
+
+      expect(() => createBranchedSessionFile(sessionFile, "e1")).toThrow("Invalid session file: missing header");
+    });
+  });
 });
 
 // opt-in-out-of-cwd-session-diffs: full untruncated payload from the on-disk JSONL.

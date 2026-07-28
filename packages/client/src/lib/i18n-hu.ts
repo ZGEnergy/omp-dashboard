@@ -1051,6 +1051,8 @@ export const huCatalog: Record<string, string> = {
   "session.followUpDeliveredWhenTheAgent": "Utókérés — akkor kézbesítve, amikor az ügynök befejezi a kört",
   "session.fork": "Elágazás",
   "session.forkFromHere": "Elágazás innen",
+  "session.forkSourceUnavailable": "Nem lehet elágaztatni — a pi átirat-fájlja ehhez a munkamenethez már nincs a lemezen.",
+  "session.forking": "Elágaztatás…",
   "session.forkSession": "Munkamenet elágaztatása",
   "session.forkSessionNewSessionFromThis": "Munkamenet elágaztatása (új munkamenet innentől)",
   "session.hideBrokenSessions": "Elrontott munkamenetek elrejtése?",

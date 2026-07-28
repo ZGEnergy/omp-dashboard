@@ -24,7 +24,6 @@ import {
   mdiContentCopy,
   mdiMessageOutline,
   mdiSlashForward,
-  mdiSourceFork,
   mdiTextBox,
   mdiTools,
 } from "@mdi/js";
@@ -33,6 +32,7 @@ import React, { useCallback, useRef, useState } from "react";
 import { formatMessageTime } from "../lib/format.js";
 import { t as i18nT } from "../lib/i18n";
 import { CopyButton } from "./CopyButton.js";
+import { ForkFromHereButton } from "./ForkFromHereButton.js";
 import { MarkdownContent } from "./MarkdownContent.js";
 
 interface Props {
@@ -139,15 +139,7 @@ export function SkillInvocationCard({
             title={i18nT("session.copyAsMessage", undefined, "Copy as message")}
           />
         )}
-        {entryId && onFork && (
-          <button
-            onClick={() => onFork(entryId)}
-            title={i18nT("session.forkFromHere", undefined, "Fork from here")}
-            className="p-0.5 rounded hover:bg-[var(--bg-secondary)] text-[var(--text-secondary)]"
-          >
-            <Icon path={mdiSourceFork} size={0.6} />
-          </button>
-        )}
+        {entryId && onFork && <ForkFromHereButton entryId={entryId} onFork={onFork} />}
       </div>
     </div>
   );

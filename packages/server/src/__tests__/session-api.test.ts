@@ -2,6 +2,7 @@
  * Tests for session control REST API endpoints (session-api.ts).
  */
 import { describe, it, expect, afterAll, beforeAll, vi } from "vitest";
+import { spawnPiSession } from "../process-manager.js";
 import { createServer, type DashboardServer } from "../server.js";
 
 let httpPort: number;
@@ -175,6 +176,38 @@ describe("Session Control REST API", () => {
     registerSession("resume-active", { sessionFile: "/path/session.jsonl" });
     const res = await postJson("/api/session/resume-active/resume", { mode: "continue" });
     expect(res.status).toBe(409);
+  });
+
+  // WS/REST parity for the split fork preflight. Both paths MUST classify a
+  // missing on-disk JSONL identically; a divergence here reintroduces the
+  // blank-chat fork on one of them. See change: fork-action-opens-an-empty-chat.
+  it("POST /api/session/:id/resume — 409 FORK_SOURCE_UNAVAILABLE when the file is gone but the session has content", async () => {
+    registerSession("resume-fork-gone", { sessionFile: "/definitely/not/on/disk.jsonl" });
+    // `register` resets the token counters, so stamp the content signal after.
+    server.sessionManager.update("resume-fork-gone", { tokensIn: 30_709, contextTokens: 69_607 });
+    const spawnsBefore = (spawnPiSession as any).mock.calls.length;
+
+    const res = await postJson("/api/session/resume-fork-gone/resume", { mode: "fork" });
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.code).toBe("FORK_SOURCE_UNAVAILABLE");
+    // Nothing was spawned — the point of the loud failure.
+    expect((spawnPiSession as any).mock.calls.length).toBe(spawnsBefore);
+    // `resuming` must not be left set on the (still alive) source session.
+    expect(server.sessionManager.get("resume-fork-gone")?.resuming).toBeFalsy();
+  });
+
+  it("POST /api/session/:id/resume — a zero-content session with a missing file still degrades", async () => {
+    registerSession("resume-fork-empty", { sessionFile: "/definitely/not/on/disk.jsonl" });
+    const spawnsBefore = (spawnPiSession as any).mock.calls.length;
+
+    const res = await postJson("/api/session/resume-fork-empty/resume", { mode: "fork" });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.code).toBe("FORK_DEGRADED_TO_NEW");
+    expect((spawnPiSession as any).mock.calls.length).toBe(spawnsBefore + 1);
+    expect(server.sessionManager.get("resume-fork-empty")?.resuming).toBeFalsy();
   });
 
   // ── flow-control ────────────────────────────────────────────────

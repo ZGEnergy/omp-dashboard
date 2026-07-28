@@ -8,11 +8,19 @@ import { renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { useSessionActions } from "../useSessionActions.js";
 
-function setup() {
+function setup(withDedup = false) {
   const pendingSpawnsRef = {
     current: new Map<string, { cwd: string; kind: "spawn" | "resume"; placeholderCwd?: string }>(),
   };
   const send = vi.fn();
+  // Stand-in for the real ForkPendingController: same contract (returns false
+  // when a fork for `key` is already in flight), no React state.
+  const pendingKeys = new Set<string>();
+  const beginFork = vi.fn((key: string, _sessionId: string, _requestId: string) => {
+    if (pendingKeys.has(key)) return false;
+    pendingKeys.add(key);
+    return true;
+  });
   const deps: any = {
     selectedId: "s1",
     send,
@@ -28,9 +36,10 @@ function setup() {
     pendingTerminalCwdRef: { current: null },
     terminals: new Map(),
     pendingSpawnsRef,
+    ...(withDedup ? { beginFork } : {}),
   };
   const { result } = renderHook(() => useSessionActions(deps));
-  return { actions: result.current, send, pendingSpawnsRef };
+  return { actions: result.current, send, pendingSpawnsRef, beginFork };
 }
 
 describe("useSessionActions — handleResumeSession fork", () => {
@@ -56,5 +65,48 @@ describe("useSessionActions — handleResumeSession fork", () => {
     expect(entry.kind).toBe("resume");
     // The pending entry key is the same requestId echoed on the wire.
     expect(pendingSpawnsRef.current.has(sent.requestId)).toBe(true);
+  });
+
+  // Issue #107 (c): before this, each tap minted a fresh requestId and sent
+  // another resume_session, spawning one pi per tap.
+  describe("duplicate-activation guard", () => {
+    it("sends once for two rapid forks of the same entryId", () => {
+      const { actions, send, beginFork } = setup(true);
+      actions.handleResumeSession("s1", "fork", "entry-123");
+      actions.handleResumeSession("s1", "fork", "entry-123");
+
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(beginFork).toHaveBeenCalledTimes(2);
+      // The key is the entryId, and the requestId it registered is the one
+      // that went out on the wire.
+      expect(beginFork.mock.calls[0][0]).toBe("entry-123");
+      expect(beginFork.mock.calls[0][2]).toBe(send.mock.calls[0][0].requestId);
+    });
+
+    it("still sends for a different entryId in the same session", () => {
+      const { actions, send } = setup(true);
+      actions.handleResumeSession("s1", "fork", "entry-123");
+      actions.handleResumeSession("s1", "fork", "entry-456");
+
+      expect(send).toHaveBeenCalledTimes(2);
+    });
+
+    it("keys a session-scoped fork (no entryId) on the sessionId", () => {
+      const { actions, send, beginFork } = setup(true);
+      actions.handleResumeSession("s1", "fork");
+      actions.handleResumeSession("s1", "fork");
+
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(beginFork.mock.calls[0][0]).toBe("s1");
+    });
+
+    it("does not dedup continue mode", () => {
+      const { actions, send, beginFork } = setup(true);
+      actions.handleResumeSession("s1", "continue");
+      actions.handleResumeSession("s1", "continue");
+
+      expect(send).toHaveBeenCalledTimes(2);
+      expect(beginFork).not.toHaveBeenCalled();
+    });
   });
 });

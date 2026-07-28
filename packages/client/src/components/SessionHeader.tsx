@@ -1,9 +1,10 @@
 import type { CommandInfo, DashboardSession, ImageContent, OpenSpecChange } from "@blackbelt-technology/pi-dashboard-shared/types.js";
-import { mdiArrowLeft, mdiCrosshairsGps, mdiFileCompare, mdiHeadLightbulb, mdiLinkOff, mdiPaperclip, mdiPencilOutline, mdiPlay, mdiPlayCircleOutline, mdiRefresh, mdiSourceFork, mdiViewGridOutline } from "@mdi/js";
+import { mdiArrowLeft, mdiCrosshairsGps, mdiFileCompare, mdiHeadLightbulb, mdiLinkOff, mdiLoading, mdiPaperclip, mdiPencilOutline, mdiPlay, mdiPlayCircleOutline, mdiRefresh, mdiSourceFork, mdiViewGridOutline } from "@mdi/js";
 import { Icon } from "@mdi/react";
 import React, { useEffect, useRef, useState } from "react";
 import { useMobile } from "../hooks/useMobile.js";
 import type { SessionState } from "../lib/event-reducer.js";
+import { useForkPending } from "../lib/ForkPendingContext.js";
 import { t as i18nT } from "../lib/i18n";
 import { getSessionDisplayName } from "../lib/session-display-name.js";
 import { CountBadges } from "./CountBadges.js";
@@ -294,6 +295,8 @@ export function SessionHeader({ session, state, onRename, showBack, onBack, mobi
   const [now, setNow] = useState(Date.now());
   const [isRenaming, setIsRenaming] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  // Fork feedback + duplicate guard. See change: fork-action-opens-an-empty-chat.
+  const forkPending = useForkPending()(session?.id);
   const [openspecPickerOpen, setOpenspecPickerOpen] = useState(false);
   // Flow launcher button + dialogs removed: flow management is owned by
   // flows-plugin's command-route claims and SessionFlowActionsClaim.
@@ -514,12 +517,14 @@ export function SessionHeader({ session, state, onRename, showBack, onBack, mobi
           </button>
           <button
             onClick={() => onResume!("fork")}
-            disabled={!!session.resuming}
+            disabled={!!session.resuming || forkPending}
             className="text-[10px] px-1.5 py-0.5 rounded border border-blue-500/30 text-blue-400 hover:bg-blue-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
-            title={i18nT("session.forkSessionNewSessionFromThis", undefined, "Fork session (new session from this point)")}
+            title={forkPending
+              ? i18nT("session.forking", undefined, "Forking…")
+              : i18nT("session.forkSessionNewSessionFromThis", undefined, "Fork session (new session from this point)")}
             data-testid="header-fork-button"
           >
-            <Icon path={mdiSourceFork} size={0.4} className="inline mr-0.5" />{i18nT("session.fork", undefined, "Fork")}
+            <Icon path={forkPending ? mdiLoading : mdiSourceFork} size={0.4} className={`inline mr-0.5${forkPending ? " animate-spin" : ""}`} />{i18nT("session.fork", undefined, "Fork")}
           </button>
         </>
       ) : (

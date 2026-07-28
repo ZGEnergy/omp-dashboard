@@ -622,6 +622,8 @@ const zhCN: Record<string, string> = {
   "session.fork": "派生",
   "session.forkFromHere": "从此处派生",
   "session.forkSession": "派生会话",
+  "session.forkSourceUnavailable": "无法派生 — pi 中此会话的记录文件已不在磁盘上。",
+  "session.forking": "正在派生…",
   "session.forkSessionNewSessionFromThis": "派生会话（从此处新建会话）",
   "session.hideBrokenSessions": "隐藏损坏的会话？",
   "session.hideSession": "隐藏会话",

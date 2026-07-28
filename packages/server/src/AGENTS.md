@@ -124,6 +124,7 @@ Files in this directory. One row per source file.
 | `server.ts` | Dashboard HTTP + WebSocket server. Exports `ServerConfig`, `DashboardServer`, `createServer(config)`. → see `server.ts.AGENTS.md` |
 | `session-api.ts` | REST wrappers for session control. Exports `registerSessionApi(fastify, deps)`. → see `session-api.ts.AGENTS.md` |
 | `session-bootstrap.ts` | Exports `discoverAndBroadcastSessions(deps)` — async startup discovery from known directories, restores… → see `session-bootstrap.ts.AGENTS.md` |
+| `session-content.ts` | Fork-preflight content predicate. Exports `sessionHasForkableContent(session)` — true when `tokensIn`/`tokensOut`/`contextTokens` > 0 or `firstMessage` non-blank. Pure + O(1) + reachable from WS handler AND REST (`SessionApiDeps` has no `eventStore`). Splits "empty session" from "file rotated away" so only the former degrades to a fresh spawn. See change: fork-action-opens-an-empty-chat. |
 | `session-diff.ts` | `extractFileChanges(events, cwd)` scans `tool_execution_start` write/edit events, groups by path, attaches… → see `session-diff.ts.AGENTS.md` |
 | `session-discovery.ts` | Standalone per-cwd session discovery from `~/.pi/agent/sessions/<encoded-cwd>/`. → see `session-discovery.ts.AGENTS.md` |
 | `session-file-reader.ts` | Standalone JSONL session reader. Exports `SessionEntry`, `loadSessionEntries(filePath)` (leaf→root branch… → see `session-file-reader.ts.AGENTS.md` |
