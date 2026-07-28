@@ -1,6 +1,6 @@
 ---
 name: code-quality
-description: Drive static-analysis code quality in pi-agent-dashboard with Biome (analyze → fix → test). Two modes — changed-files (the goal-loop daily driver, scoped to git diff vs develop) and whole-repo (explicit, scoped cleanup). Owns the procedure; the goal-plugin's judge owns when-to-stop via the `quality:changed` exit code. Use when asked to "improve code quality", "lint and fix", "clean up warnings", "fix Biome issues", "run static analysis", or when setting a code-quality goal. Skip for one-line edits.
+description: Drive static-analysis code quality in pi-agent-dashboard with Biome (analyze → fix → test). Two modes — changed-files (the goal-loop daily driver, scoped to git diff vs main) and whole-repo (explicit, scoped cleanup). Owns the procedure; the goal-plugin's judge owns when-to-stop via the `quality:changed` exit code. Use when asked to "improve code quality", "lint and fix", "clean up warnings", "fix Biome issues", "run static analysis", or when setting a code-quality goal. Skip for one-line edits.
 ---
 
 # Code Quality (Biome)
@@ -13,7 +13,7 @@ Analyze → fix → test, drivable by the goal-plugin's judge loop. The skill is
 ```mermaid
 flowchart TD
     Q{Driving a goal /<br/>cleaning your own work?}
-    Q -->|default| C[CHANGED-FILES MODE<br/>goal loop · git diff vs develop<br/>surgical, low blast radius]
+    Q -->|default| C[CHANGED-FILES MODE<br/>goal loop · git diff vs main<br/>surgical, low blast radius]
     Q -->|explicit cleanup| W[WHOLE-REPO MODE<br/>human-gated · one package,<br/>one rule-group per turn]
     C --> CC[npm run quality:changed]
     W --> WW["biome lint &lt;pkg&gt; --only=&lt;group&gt;"]
@@ -28,7 +28,8 @@ One command, one exit code:
 
 ```bash
 npm run quality:changed
-# = biome check --changed --error-on-warnings --write  (safe-fix the diff)
+# = biome check --changed --error-on-warnings --write --no-errors-on-unmatched
+#                                                       (safe-fix the diff)
 #   && tsc --noEmit                                     (type gate)
 #   && npm test                                         (test gate)
 ```
@@ -37,8 +38,10 @@ npm run quality:changed
   → **goal achieved**.
 - non-zero → fix the reported issues, run again. The judge says **continue**.
 
-`--changed` compares the **committed** branch state against `develop` (the repo's
-integration branch, set as `vcs.defaultBranch` in `biome.json`). Uncommitted or
+`--changed` compares the **committed** branch state against `main` (this fork's
+default branch, set as `vcs.defaultBranch` in `biome.json`; upstream uses
+`develop`). Biome resolves it as a **local** ref, so keep local `main` current.
+An empty changed-set exits 0 thanks to `--no-errors-on-unmatched`. Uncommitted or
 untracked files are NOT scoped by `--changed` — commit your work first, or pass an
 explicit path.
 
