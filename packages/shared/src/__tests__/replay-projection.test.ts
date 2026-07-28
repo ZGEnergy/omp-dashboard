@@ -162,6 +162,83 @@ describe("coalesceProjection", () => {
     expect(JSON.stringify(out).length).toBeLessThan(400);
   });
 
+  // Regression: models that stream reasoning alongside a tool call (observed on
+  // openai-codex/gpt-5.6-sol at thinkingLevel high) emit an assistant shell whose
+  // content is a NON-EMPTY thinking block plus a toolCall. The original
+  // tool-only test required an EMPTY thinking block, so these shells matched
+  // nothing and passed through whole — ~10.7 KB each, ~2,000 per session, 41% of
+  // the hydration window. The toolCall args are already carried by
+  // `tool_execution_start`; the reasoning is the only copy and must survive.
+  const reasoningShell = (seq: number, eventType: string, thinking: string) =>
+    ev(seq, eventType, {
+      message: {
+        id: "m1",
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking },
+          { type: "toolCall", toolCallId: "t1", args: { body: "x".repeat(5000) } },
+        ],
+      },
+    });
+
+  it("strips duplicated toolCall args from an assistant shell that carries real reasoning", () => {
+    const out = coalesceProjection([reasoningShell(1, "message_end", "why I chose this tool")]);
+    const content = (out[0]!.event.data as { message: { content: any[] } }).message.content;
+
+    const toolCall = content.find((b) => b?.type === "toolCall");
+    expect(toolCall).toBeDefined();
+    expect(toolCall.args).toBeUndefined();
+
+    const thinking = content.find((b) => b?.type === "thinking");
+    expect(thinking?.thinking).toBe("why I chose this tool");
+  });
+
+  it("keeps the reasoning shell far smaller than the args it duplicated", () => {
+    const out = coalesceProjection([reasoningShell(1, "message_end", "short reason")]);
+    expect(JSON.stringify(out).length).toBeLessThan(500);
+  });
+
+  // Measured on the real session: `message.providerPayload` was 64% of all
+  // surviving `message_end` bytes (389 KB of 609 KB) and `thinkingSignature`
+  // was 4,029 of a thinking block's 4,126 bytes — the reasoning text itself was
+  // 45 bytes. Neither field is read anywhere in the repo; both are provider
+  // bookkeeping forwarded verbatim from pi.
+  it("drops providerPayload, which nothing renders", () => {
+    const out = coalesceProjection([
+      ev(1, "message_end", {
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "hi" }],
+          providerPayload: { raw: "z".repeat(12000) },
+        },
+      }),
+    ]);
+    const message = (out[0]!.event.data as { message: Record<string, unknown> }).message;
+    expect(message.providerPayload).toBeUndefined();
+    expect(message.content).toEqual([{ type: "text", text: "hi" }]);
+  });
+
+  it("drops thinkingSignature but keeps the reasoning text", () => {
+    const out = coalesceProjection([
+      ev(1, "message_end", {
+        message: {
+          role: "assistant",
+          content: [{ type: "thinking", thinking: "the real reason", thinkingSignature: "s".repeat(4000) }],
+        },
+      }),
+    ]);
+    const content = (out[0]!.event.data as { message: { content: any[] } }).message.content;
+    expect(content[0].thinkingSignature).toBeUndefined();
+    expect(content[0].thinking).toBe("the real reason");
+  });
+
+  it("leaves an assistant message with no provider metadata byte-identical", () => {
+    const input = [
+      ev(1, "message_end", { message: { role: "assistant", content: [{ type: "text", text: "hi" }] } }),
+    ];
+    expect(JSON.stringify(coalesceProjection(input))).toEqual(JSON.stringify(input));
+  });
+
   it("keeps the turn envelope on a tool-only assistant message_end", () => {
     const out = coalesceProjection([
       ev(1, "message_end", {

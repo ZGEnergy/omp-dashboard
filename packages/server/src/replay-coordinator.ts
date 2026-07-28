@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { BrowserToServerMessage, EventReplayMessage, ReplayErrorCode, ServerToBrowserMessage, SessionStateResetReason } from "@blackbelt-technology/pi-dashboard-shared/browser-protocol.js";
-import { applyToolBudget, clampTailWindowBytes, selectNewestEventsByBudget, selectOlderEventsByBudget } from "@blackbelt-technology/pi-dashboard-shared/event-window.js";
+import { applyToolBudget, clampTailWindowBytes, collapseToolsToMetadata, selectNewestEventsByBudget, selectOlderEventsByBudget } from "@blackbelt-technology/pi-dashboard-shared/event-window.js";
 import { coalesceProjection } from "@blackbelt-technology/pi-dashboard-shared/replay-projection.js";
 import { prepareEventForReplay, utf8ByteLength } from "@blackbelt-technology/pi-dashboard-shared/prepare-event-for-replay.js";
 import type { WebSocket } from "ws";
@@ -117,7 +117,10 @@ export function projectForHydration(
   if (replayKind === "older") {
     if (fromSeq == null) return coalesced;
     const page = coalesced.filter((entry) => entry.seq < fromSeq);
-    const budgeted = applyToolBudget(page, budgetBytes).events as StoredEvent[];
+    // An older page is history being scrolled past, not the tail being read:
+    // stub every tool payload so one page reaches much further back. Any stub
+    // re-inflates on click through the existing `toolCallId` fetch path.
+    const budgeted = collapseToolsToMetadata(page) as StoredEvent[];
     const bySeq = new Map(budgeted.map((entry) => [entry.seq, entry]));
     // Splice the budgeted page back over its source range: the caller still
     // selects from the full coalesced array, and its seq set must not change.

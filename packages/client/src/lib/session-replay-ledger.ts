@@ -207,7 +207,18 @@ export class SessionReplayLedger {
       this.drainGaps(result.accepted);
     }
 
-    result.evictedHead = this.trimRetained();
+    // An `older` page is admitted at the OLDEST end, which is exactly the end
+    // `trimRetained` evicts from. Trimming here deleted the page the user just
+    // asked for: once the ledger was full, every further page was admitted and
+    // immediately discarded, `minSeq` stopped moving, and back-paging became a
+    // silent no-op. Measured against a real 19,677-event session, paging
+    // stalled at seq 15,060 and the first user prompt was unreachable.
+    //
+    // The cap is still enforced — just not by the request that is deliberately
+    // growing the ledger backwards. It re-applies on the next live admission
+    // and on `setMaxRetainedBytes`, which the controller lowers back to the
+    // base ceiling when the user returns to the live tail.
+    if (frame.replayKind !== "older") result.evictedHead = this.trimRetained();
 
     if (frame.isLast) {
       const completed = this.active;

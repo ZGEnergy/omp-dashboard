@@ -93,6 +93,110 @@ function isToolOnlyAssistantMessage(event: DashboardEvent): boolean {
   );
 }
 
+/**
+ * An assistant `message_end` whose content is reasoning plus tool calls — no
+ * prose. `isToolOnlyAssistantMessage` above matches only the EMPTY-thinking
+ * variant, which is what Claude emits; a model that streams real reasoning
+ * alongside the call (openai-codex/gpt-5.6-sol at thinkingLevel high) produces
+ * a non-empty thinking block and matched nothing, so the whole shell — args
+ * included — survived at full size.
+ *
+ * Restricted to `message_end` deliberately. A `message_update` of the same
+ * shape is superseded by the `message_end` that follows it and is already
+ * blanked outright, which is strictly cheaper than stripping it.
+ */
+function isReasoningToolShell(event: DashboardEvent): boolean {
+  if (event.eventType !== "message_end") return false;
+  const message = (event.data as { message?: { role?: unknown; content?: unknown } } | undefined)?.message;
+  const content = message?.content;
+  if (message?.role !== "assistant" || !Array.isArray(content)) return false;
+  return (
+    content.some((part: { type?: unknown }) => part?.type === "toolCall") &&
+    content.some((part: { type?: unknown; thinking?: unknown; text?: unknown }) =>
+      part?.type === "thinking" && Boolean(part.thinking || part.text),
+    ) &&
+    content.every((part: { type?: unknown }) => part?.type === "toolCall" || part?.type === "thinking")
+  );
+}
+
+/**
+ * Drop `arguments`/`args` from the shell's `toolCall` parts, keeping every
+ * reasoning block verbatim.
+ *
+ * The args are already carried by the turn's `tool_execution_start` event, so
+ * this removes a duplicate, not content. The reasoning is the only copy — the
+ * superseded `message_update` that also held it has been blanked — so it must
+ * survive here or the turn loses its rendered thinking.
+ */
+function stripShellToolArgs(entry: SeqEvent<DashboardEvent>): SeqEvent<DashboardEvent> {
+  const data = (entry.event.data ?? {}) as Record<string, unknown>;
+  const message = data.message as Record<string, unknown>;
+  const content = (message.content as Array<Record<string, unknown>>).map((part) => {
+    if (part?.type !== "toolCall") return part;
+    const { arguments: _args, args: _shortArgs, ...rest } = part;
+    return rest;
+  });
+  return {
+    seq: entry.seq,
+    event: { ...entry.event, data: { ...data, message: { ...message, content } } } as unknown as DashboardEvent,
+  };
+}
+
+/**
+ * Provider bookkeeping forwarded verbatim from pi and read by nothing.
+ *
+ * Measured on a real openai-codex/gpt-5.6-sol session: `providerPayload` was
+ * 389 KB of the 609 KB of surviving `message_end` bytes (64%), and
+ * `thinkingSignature` was 4,029 bytes of a 4,126-byte thinking block whose
+ * actual reasoning text was 45 bytes. A repo-wide search finds zero readers of
+ * either field outside this list, so dropping them on hydration removes wire
+ * cost without removing anything the transcript can render.
+ *
+ * Live streaming is untouched — it never enters the projection — so a consumer
+ * that needs these fields still sees them on the live path.
+ */
+const UNRENDERED_MESSAGE_FIELDS = ["providerPayload"] as const;
+const UNRENDERED_BLOCK_FIELDS = ["thinkingSignature"] as const;
+
+/**
+ * Strip unrendered provider metadata from an assistant message envelope and
+ * its content blocks. Returns the original entry when there is nothing to
+ * strip, so untouched events stay byte-identical.
+ */
+function stripProviderMetadata(entry: SeqEvent<DashboardEvent>): SeqEvent<DashboardEvent> {
+  const data = entry.event.data as Record<string, unknown> | undefined;
+  const message = data?.message as Record<string, unknown> | undefined;
+  if (!message) return entry;
+
+  let changed = false;
+  const nextMessage: Record<string, unknown> = { ...message };
+  for (const field of UNRENDERED_MESSAGE_FIELDS) {
+    if (field in nextMessage) {
+      delete nextMessage[field];
+      changed = true;
+    }
+  }
+
+  const content = message.content;
+  if (Array.isArray(content)) {
+    const nextContent = content.map((part: Record<string, unknown>) => {
+      if (!part || typeof part !== "object") return part;
+      if (!UNRENDERED_BLOCK_FIELDS.some((field) => field in part)) return part;
+      const next = { ...part };
+      for (const field of UNRENDERED_BLOCK_FIELDS) delete next[field];
+      changed = true;
+      return next;
+    });
+    if (changed) nextMessage.content = nextContent;
+  }
+
+  if (!changed) return entry;
+  return {
+    seq: entry.seq,
+    event: { ...entry.event, data: { ...data, message: nextMessage } } as unknown as DashboardEvent,
+  };
+}
+
 function toolCallIdOf(event: DashboardEvent): string | undefined {
   const id = (event.data as Record<string, unknown> | undefined)?.toolCallId;
   return typeof id === "string" && id.length > 0 ? id : undefined;
@@ -258,7 +362,15 @@ export function coalesceProjection(events: readonly SeqEvent<DashboardEvent>[]):
   for (const [toolCallId, index] of lastToolUpdate) {
     if (terminated.has(toolCallId)) out[index] = blank(out[index]!);
   }
-  return out;
+  // Final pass over whatever survived: shed the duplicated tool args on a
+  // reasoning shell, then the unrendered provider metadata. Both are pure
+  // payload edits at a fixed seq, so neither can affect ordering. Running them
+  // here rather than in the classification switch keeps the run-tracking loop
+  // to one concern; a reasoning shell is an assistant `message_end`, so the
+  // switch has already closed its run.
+  return out.map((entry) =>
+    stripProviderMetadata(isReasoningToolShell(entry.event) ? stripShellToolArgs(entry) : entry),
+  );
 }
 
 /** Bounded rendering of a tool invocation. Never throws on hostile args. */
