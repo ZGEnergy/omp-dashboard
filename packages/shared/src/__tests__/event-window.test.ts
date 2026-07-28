@@ -112,12 +112,20 @@ describe("selectNewestEventsByBudget", () => {
     expect(r.events.map((entry) => entry.seq)).toEqual([10, 11, 12]);
   });
 
-  it("classifies a noncontiguous source instead of returning a valid-looking range", () => {
+  // A seq GAP is the normal state of a trimmed session: the memory event store's
+  // `trim()` drops old non-essential events while preserving message_start/end in
+  // place. Rejecting the whole source on a gap made every session past
+  // DEFAULT_MAX_EVENTS_PER_SESSION hydrate to an empty transcript. The selector
+  // now windows over the longest contiguous suffix and flags `hasMoreOlder`, so
+  // the DELIVERED range stays dense for the client ledger.
+  // See change: fix-sparse-store-empty-hydration.
+  it("windows over the contiguous suffix of a noncontiguous source", () => {
     const r = selectNewestEventsByBudget([ev(10, 10), ev(20, 10), ev(21, 10)], 1_000_000);
-    expect(r.events).toEqual([]);
-    expect(r.sourceMalformed).toBe(true);
-    expect(r.windowMinSeq).toBeNull();
-    expect(r.windowMaxSeq).toBeNull();
+    expect(r.events.map((entry) => entry.seq)).toEqual([20, 21]);
+    expect(r.sourceMalformed).toBeUndefined();
+    expect(r.hasMoreOlder).toBe(true);
+    expect(r.windowMinSeq).toBe(20);
+    expect(r.windowMaxSeq).toBe(21);
   });
 
   it.each([

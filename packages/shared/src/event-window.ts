@@ -267,10 +267,33 @@ function isDashboardEvent(value: unknown): value is DashboardEvent {
   }
 }
 
-function snapshotContiguousAscending(events: unknown): SeqEvent<DashboardEvent>[] | null {
+/**
+ * Snapshot the source's longest CONTIGUOUS SUFFIX, or `null` when the source is
+ * genuinely invalid (bad entry shape, descending or duplicate seqs).
+ *
+ * A seq GAP is not invalid — it is the normal state of a trimmed session. The
+ * memory event store's `trim()` drops the oldest non-essential events while
+ * preserving `message_start`/`message_end` in place, so every session past
+ * `DEFAULT_MAX_EVENTS_PER_SESSION` has a sparse retained range. Rejecting the
+ * whole source on a gap made those sessions hydrate to a completely empty
+ * transcript (only live-streamed events rendered).
+ *
+ * Windowing over the contiguous suffix serves the newest history while keeping
+ * the DELIVERED range dense, which is non-negotiable: `SessionReplayLedger`
+ * accepts strictly `cursor + 1` and resets on `gap_overflow`, so a sparse wire
+ * model is not an option (that was PR #102's dead end).
+ *
+ * `truncatedAtGap` tells the caller older content exists below the suffix, so
+ * `hasMoreOlder` stays accurate and load-older keeps working.
+ * See change: fix-sparse-store-empty-hydration.
+ */
+function snapshotContiguousAscending(
+  events: unknown,
+): { snapshot: SeqEvent<DashboardEvent>[]; truncatedAtGap: boolean } | null {
   if (!Array.isArray(events)) return null;
-  const snapshot: SeqEvent<DashboardEvent>[] = [];
+  const all: SeqEvent<DashboardEvent>[] = [];
   let previousSeq: number | undefined;
+  let lastGapIndex = -1;
   try {
     for (const entry of events) {
       if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
@@ -278,11 +301,16 @@ function snapshotContiguousAscending(events: unknown): SeqEvent<DashboardEvent>[
       const seq = record.seq;
       const event = record.event;
       if (typeof seq !== "number" || !Number.isSafeInteger(seq) || !isDashboardEvent(event)) return null;
-      if (previousSeq !== undefined && seq !== previousSeq + 1) return null;
-      snapshot.push({ seq, event });
+      // Descending or duplicate seqs are corruption, not trimming — still fatal.
+      if (previousSeq !== undefined && seq <= previousSeq) return null;
+      if (previousSeq !== undefined && seq !== previousSeq + 1) lastGapIndex = all.length;
+      all.push({ seq, event });
       previousSeq = seq;
     }
-    return snapshot;
+    return {
+      snapshot: lastGapIndex === -1 ? all : all.slice(lastGapIndex),
+      truncatedAtGap: lastGapIndex !== -1,
+    };
   } catch {
     return null;
   }
@@ -376,10 +404,13 @@ function resultFromSelection<T>(
   selected: SeqEvent<T>[],
   bytes: number,
   partialHead: boolean,
+  truncatedAtGap = false,
 ): EventWindowResult<T> {
   return {
     events: selected,
-    hasMoreOlder: selected.length < sourceLength,
+    // A source truncated at a gap always has older content below it, even when
+    // the whole contiguous suffix fits the budget.
+    hasMoreOlder: truncatedAtGap || selected.length < sourceLength,
     partialHead,
     windowMinSeq: selected[0]?.seq ?? null,
     windowMaxSeq: selected.at(-1)?.seq ?? null,
@@ -438,9 +469,10 @@ function finalizeSelectedEntries(
   partialHead: boolean,
   budget: number,
   options: EventWindowPreparationOptions,
+  truncatedAtGap = false,
 ): EventWindowResult<DashboardEvent> {
   if (!options.registerInlineAsset) {
-    return resultFromSelection(source.length, selected, bytes, partialHead);
+    return resultFromSelection(source.length, selected, bytes, partialHead, truncatedAtGap);
   }
 
   const sourceBySeq = new Map(source.map((entry) => [entry.seq, entry]));
@@ -453,6 +485,7 @@ function finalizeSelectedEntries(
       prepared.events,
       preparedBytes,
       partialHead || selectionContainsTruncation(prepared.events, prepared.truncatedSeqs),
+      truncatedAtGap,
     );
   }
 
@@ -465,6 +498,7 @@ function finalizeSelectedEntries(
     compacted.events,
     compacted.bytes,
     partialHead || compacted.truncated || selectionContainsTruncation(compacted.events, prepared.truncatedSeqs),
+    truncatedAtGap,
   );
 }
 
@@ -481,8 +515,9 @@ export function selectNewestEventsByBudget(
   const budget = Number.isFinite(budgetBytes) && budgetBytes > 0
     ? Math.floor(budgetBytes)
     : DEFAULT_TAIL_WINDOW_BYTES;
-  const source = snapshotContiguousAscending(eventsAsc);
-  if (source === null) return malformedWindow();
+  const snapshotResult = snapshotContiguousAscending(eventsAsc);
+  if (snapshotResult === null) return malformedWindow();
+  const { snapshot: source, truncatedAtGap } = snapshotResult;
   if (source.length === 0) return emptyWindow();
 
   const perEventCap = computePerEventCap(budget, options.maxEventBytes);
@@ -522,6 +557,7 @@ export function selectNewestEventsByBudget(
     partialHead,
     budget,
     options,
+    truncatedAtGap,
   );
 }
 
@@ -533,10 +569,13 @@ export function selectOlderEventsByBudget(
   options: EventWindowPreparationOptions = {},
 ): EventWindowResult<DashboardEvent> {
   if (!Number.isSafeInteger(fromSeq)) return malformedWindow();
-  const source = snapshotContiguousAscending(eventsAsc);
-  if (source === null) return malformedWindow();
+  const snapshotResult = snapshotContiguousAscending(eventsAsc);
+  if (snapshotResult === null) return malformedWindow();
   try {
-    const older = source.filter((entry) => entry.seq < fromSeq);
+    // Filter the RAW source, not the contiguous suffix: paging below the gap
+    // must still see the older dense runs. `selectNewestEventsByBudget`
+    // re-snapshots and picks that range's own contiguous suffix.
+    const older = (eventsAsc as readonly SeqEvent<DashboardEvent>[]).filter((entry) => entry.seq < fromSeq);
     return selectNewestEventsByBudget(older, budgetBytes, options);
   } catch {
     return malformedWindow();
