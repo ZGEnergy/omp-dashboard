@@ -361,7 +361,12 @@ export async function handleResumeSession(
   //  - Has content: spawn NOTHING and fail loudly with
   //    `FORK_SOURCE_UNAVAILABLE`. See change: fork-action-opens-an-empty-chat.
   if (msg.mode === "fork" && session.sessionFile && !existsSync(session.sessionFile)) {
-    if (sessionHasForkableContent(session)) {
+    // The event-store check is the bridge-version-independent backstop: a
+    // reattached session's token counters are zeroed by `event-wiring.ts` and
+    // an older bridge sends no `firstMessage`, so the replayed conversation
+    // events are the only surviving proof of content.
+    // See change: fork-content-predicate.
+    if (sessionHasForkableContent(session, ctx.eventStore?.hasConversationEvents?.(msg.sessionId) ?? false)) {
       finishFork({
         success: false,
         message: FORK_SOURCE_UNAVAILABLE_MESSAGE,

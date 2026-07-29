@@ -1069,6 +1069,9 @@ export async function createServer(config: ServerConfig): Promise<DashboardServe
     pendingDashboardSpawns,
     pendingResumeIntents,
     pendingAttachRegistry,
+    // Fork preflight conversation backstop — keeps REST in parity with the WS
+    // handler. See change: fork-content-predicate.
+    eventStore,
   });
 
   // Register route modules

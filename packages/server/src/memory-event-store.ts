@@ -26,6 +26,16 @@ export interface EventStore {
   findToolEndEvent(sessionId: string, toolCallId: string): DashboardEvent | undefined;
   deleteEventsForSession(sessionId: string): number;
   hasEvents(sessionId: string): boolean;
+  /**
+   * True when the session's retained buffer holds at least one CONVERSATION
+   * event. Deliberately narrower than `hasEvents`: a freshly-spawned session
+   * already carries register-time plugin chatter (`flow:list-flows` lands at
+   * seq=1), so `hasEvents` would certify it as content-bearing and break the
+   * fork degrade contract (change: fix-fork-empty-session-silent-timeout).
+   * Early-returns on the first match — O(1) amortised for a live session.
+   * See change: fork-content-predicate.
+   */
+  hasConversationEvents(sessionId: string): boolean;
   getMaxSeq(sessionId: string): number;
   getSourceGeneration(sessionId: string): string;
   getRetainedRange(sessionId: string): RetainedRange;
@@ -48,7 +58,13 @@ export const DEFAULT_MAX_CACHED_SESSIONS = 100;
 export const DEFAULT_MAX_EVENTS_PER_SESSION = 20_000;
 export const DEFAULT_MAX_STRING_SIZE = 4_000;
 export const DEFAULT_MAX_EVENT_DATA_SIZE = 20_000;
-const SKILL_ENVELOPE_RE = /^(<skill name="[^"]+" location="[^"]+">\n)([\s\S]*?)(\n<\/skill>)((?:\n\n[\s\S]+)?)$/;
+/**
+ * Event types that prove a real conversation happened. Register-time plugin
+ * chatter (`flow:*`, `terminal:*`, …) and tool traffic are excluded on purpose
+ * — see `EventStore.hasConversationEvents`.
+ */
+export const CONVERSATION_EVENT_TYPES: ReadonlySet<string> = new Set(["message_update", "message_end"]);
+const SKILL_ENVELOPE_RE =/^(<skill name="[^"]+" location="[^"]+">\n)([\s\S]*?)(\n<\/skill>)((?:\n\n[\s\S]+)?)$/;
 
 function isImageBlock(value: object): boolean {
   return typeof (value as Record<string, unknown>).data === "string" && "mimeType" in value;
@@ -327,6 +343,14 @@ export function createMemoryEventStore(
       return { sourceGeneration: buffer.sourceGeneration, events: buffer.events.slice(), range: { retainedMinSeq: buffer.events[0]?.seq ?? null, retainedMaxSeq: buffer.events.at(-1)?.seq ?? null, historyTruncated: buffer.historyTruncated } };
     },
     hasEvents(sessionId) { return (buffers.get(sessionId)?.events.length ?? 0) > 0; },
+    hasConversationEvents(sessionId) {
+      const buffer = buffers.get(sessionId);
+      if (!buffer) return false;
+      for (const entry of buffer.events) {
+        if (CONVERSATION_EVENT_TYPES.has(entry.event.eventType)) return true;
+      }
+      return false;
+    },
     getMaxSeq(sessionId) { return buffers.get(sessionId)?.events.at(-1)?.seq ?? 0; },
     getSourceGeneration(sessionId) { return buffers.get(sessionId)?.sourceGeneration ?? generation(revisions.get(sessionId) ?? 0); },
     getRetainedRange(sessionId) {

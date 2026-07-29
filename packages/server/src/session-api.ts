@@ -43,6 +43,13 @@ export interface SessionApiDeps {
    * See change: fix-fork-empty-session-silent-timeout.
    */
   pendingAttachRegistry?: import("./pending-attach-registry.js").PendingAttachRegistry;
+  /**
+   * Optional event store. Supplies the fork preflight's conversation backstop
+   * so this endpoint classifies identically to the WS handler (which reads it
+   * off `BrowserHandlerContext`). Absent → the preflight falls back to the
+   * session fields alone. See change: fork-content-predicate.
+   */
+  eventStore?: import("./memory-event-store.js").EventStore;
 }
 
 type IdParams = { Params: { id: string } };
@@ -55,7 +62,7 @@ function getSessionOrFail(sessionManager: SessionManager, id: string): { session
 }
 
 export function registerSessionApi(fastify: FastifyInstance, deps: SessionApiDeps) {
-  const { sessionManager, piGateway, browserGateway, pendingForkRegistry, pendingDashboardSpawns, pendingResumeIntents, pendingAttachRegistry } = deps;
+  const { sessionManager, piGateway, browserGateway, pendingForkRegistry, pendingDashboardSpawns, pendingResumeIntents, pendingAttachRegistry, eventStore } = deps;
 
   // Bootstrap gate + queue removed under change: eliminate-electron-runtime-install
   // (task 3.5). pi/openspec/tsx ship as regular npm deps so pi is always
@@ -267,7 +274,7 @@ export function registerSessionApi(fastify: FastifyInstance, deps: SessionApiDep
       // fix-fork-empty-session-silent-timeout); has content → spawn nothing
       // and fail loudly (see change: fork-action-opens-an-empty-chat).
       if (mode === "fork" && !existsSync(session.sessionFile)) {
-        if (sessionHasForkableContent(session)) {
+        if (sessionHasForkableContent(session, eventStore?.hasConversationEvents(id) ?? false)) {
           clearForkResuming();
           reply.code(409);
           return {

@@ -2,39 +2,22 @@
  * Tests for session switch/fork behavior in the bridge extension.
  * These test the helper functions and logic used during session changes.
  */
-import { describe, it, expect } from "vitest";
-
-// We test the extractFirstMessage logic inline since it's a local function in bridge.ts.
-// Replicate the logic here to verify behavior.
-
-function extractFirstMessage(ctx: any): string | undefined {
-  try {
-    const entries = ctx.sessionManager?.getEntries?.();
-    if (!entries || !Array.isArray(entries)) return undefined;
-    for (const entry of entries) {
-      if (entry.role === "user" && typeof entry.content === "string") {
-        return entry.content.slice(0, 200);
-      }
-      if (entry.role === "user" && Array.isArray(entry.content)) {
-        for (const part of entry.content) {
-          if (part.type === "text" && typeof part.text === "string") {
-            return part.text.slice(0, 200);
-          }
-        }
-      }
-    }
-  } catch { /* ignore */ }
-  return undefined;
-}
+import { describe, expect, it } from "vitest";
+// Import the REAL function. This file used to re-implement `extractFirstMessage`
+// inline and feed the copy a `{ role: "user" }` shape pi never produces, so the
+// suite stayed green while production matched nothing (issue #107 follow-up).
+// Fixtures below use pi's real `SessionEntry` envelope.
+// See change: fork-content-predicate.
+import { extractFirstMessage } from "../bridge-context.js";
 
 describe("extractFirstMessage", () => {
   it("should extract first user message as string content", () => {
     const ctx = {
       sessionManager: {
         getEntries: () => [
-          { role: "system", content: "You are a helpful assistant" },
-          { role: "user", content: "Help me fix the auth module" },
-          { role: "assistant", content: "Sure, I'll help" },
+          { type: "model_change", model: { provider: "anthropic", id: "opus" } },
+          { type: "message", message: { role: "user", content: "Help me fix the auth module" } },
+          { type: "message", message: { role: "assistant", content: "Sure, I'll help" } },
         ],
       },
     };
@@ -46,11 +29,14 @@ describe("extractFirstMessage", () => {
       sessionManager: {
         getEntries: () => [
           {
-            role: "user",
-            content: [
-              { type: "text", text: "Look at this image and fix the bug" },
-              { type: "image", data: "base64..." },
-            ],
+            type: "message",
+            message: {
+              role: "user",
+              content: [
+                { type: "text", text: "Look at this image and fix the bug" },
+                { type: "image", data: "base64..." },
+              ],
+            },
           },
         ],
       },
@@ -62,7 +48,7 @@ describe("extractFirstMessage", () => {
     const longMessage = "a".repeat(300);
     const ctx = {
       sessionManager: {
-        getEntries: () => [{ role: "user", content: longMessage }],
+        getEntries: () => [{ type: "message", message: { role: "user", content: longMessage } }],
       },
     };
     expect(extractFirstMessage(ctx)).toBe("a".repeat(200));
