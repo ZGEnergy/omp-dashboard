@@ -172,18 +172,32 @@ export function isHeadlessRpcSession(
   return false;
 }
 
-/** Extract first user message text from session entries */
+/**
+ * Extract first user message text from session entries.
+ *
+ * `SessionManager.getEntries()` returns pi `SessionEntry` ENVELOPES — a user
+ * turn is `{ type: "message", message: { role: "user", content } }`. No
+ * `SessionEntry` variant carries a top-level `role`, so the earlier
+ * `entry.role === "user"` test never matched and this returned `undefined` for
+ * every real session — leaving `firstMessage` unset on the `session_register`
+ * wire and the fork content predicate inert (issue #107 follow-up).
+ * `state-replay.ts` and `session-scanner.ts` already read the envelope.
+ * See change: fork-content-predicate.
+ */
 export function extractFirstMessage(ctx: any): string | undefined {
   try {
     const entries = ctx?.sessionManager?.getEntries?.();
     if (!entries || !Array.isArray(entries)) return undefined;
     for (const entry of entries) {
-      if (entry.role === "user" && typeof entry.content === "string") {
-        return entry.content.slice(0, 200);
+      if (entry?.type !== "message") continue;
+      const message = entry.message;
+      if (message?.role !== "user") continue;
+      if (typeof message.content === "string") {
+        return message.content.slice(0, 200);
       }
-      if (entry.role === "user" && Array.isArray(entry.content)) {
-        for (const part of entry.content) {
-          if (part.type === "text" && typeof part.text === "string") {
+      if (Array.isArray(message.content)) {
+        for (const part of message.content) {
+          if (part?.type === "text" && typeof part.text === "string") {
             return part.text.slice(0, 200);
           }
         }
