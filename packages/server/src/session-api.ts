@@ -8,7 +8,12 @@ import { loadConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js"
 import type { ApiResponse } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import type { FastifyInstance } from "fastify";
 import type { BrowserGateway } from "./browser-gateway.js";
-import { FORK_DEGRADED_TO_NEW_CODE, FORK_DEGRADED_TO_NEW_MESSAGE } from "./browser-handlers/session-action-handler.js";
+import {
+  FORK_DEGRADED_TO_NEW_CODE,
+  FORK_DEGRADED_TO_NEW_MESSAGE,
+  FORK_SOURCE_UNAVAILABLE_CODE,
+  FORK_SOURCE_UNAVAILABLE_MESSAGE,
+} from "./browser-handlers/session-action-handler.js";
 import { keeperOptsFromSpawnResult } from "./headless-pid-registry.js";
 import type { SessionManager } from "./memory-session-manager.js";
 import type { PendingForkRegistry } from "./pending-fork-registry.js";
@@ -16,6 +21,7 @@ import type { PendingResumeIntentRegistry } from "./pending-resume-intent-regist
 import type { PiGateway } from "./pi-gateway.js";
 import { spawnPiSession } from "./process-manager.js";
 import { attachRenameTarget, detachShouldClearName } from "./proposal-attach-naming.js";
+import { sessionHasForkableContent } from "./session-content.js";
 
 export interface SessionApiDeps {
   sessionManager: SessionManager;
@@ -240,10 +246,36 @@ export function registerSessionApi(fastify: FastifyInstance, deps: SessionApiDep
         reply.code(409);
         return { success: false, error: "session is already being resumed" } satisfies ApiResponse;
       }
-      // Fork preflight: silent-degrade when the source has no on-disk JSONL.
-      // Mirrors the WS-handler logic. See change:
-      // fix-fork-empty-session-silent-timeout.
+      // Fork sets `resuming` on the SOURCE session (which stays alive), so
+      // every fork exit below must clear it or the source's Resume/Fork
+      // controls stay disabled forever. Parity with the WS handler.
+      // See change: fork-action-opens-an-empty-chat.
+      const isFork = mode === "fork";
+      if (isFork) {
+        sessionManager.update(id, { resuming: true });
+        browserGateway.broadcastSessionUpdated(id, { resuming: true });
+      }
+      const clearForkResuming = (): void => {
+        if (!isFork) return;
+        sessionManager.update(id, { resuming: false });
+        browserGateway.broadcastSessionUpdated(id, { resuming: false });
+      };
+
+      // Fork preflight — MUST classify identically to the WS handler
+      // (`session-action-handler.ts`). Missing on-disk JSONL splits two ways:
+      // no content → degrade to a fresh spawn (see change:
+      // fix-fork-empty-session-silent-timeout); has content → spawn nothing
+      // and fail loudly (see change: fork-action-opens-an-empty-chat).
       if (mode === "fork" && !existsSync(session.sessionFile)) {
+        if (sessionHasForkableContent(session)) {
+          clearForkResuming();
+          reply.code(409);
+          return {
+            success: false,
+            error: FORK_SOURCE_UNAVAILABLE_MESSAGE,
+            code: FORK_SOURCE_UNAVAILABLE_CODE,
+          } satisfies ApiResponse;
+        }
         // Inherit attachedProposal from parent.
         if (session.attachedProposal && pendingAttachRegistry) {
           pendingAttachRegistry.enqueue(session.cwd, session.attachedProposal);
@@ -267,6 +299,7 @@ export function registerSessionApi(fastify: FastifyInstance, deps: SessionApiDep
             (pendingDashboardSpawns?.get(session.cwd) ?? 0) + 1,
           );
         }
+        clearForkResuming();
         if (!degradeResult.success) {
           reply.code(500);
           return {
@@ -301,6 +334,7 @@ export function registerSessionApi(fastify: FastifyInstance, deps: SessionApiDep
       if (spawnResult.dashboardSpawned && spawnResult.success) {
         pendingDashboardSpawns?.set(session.cwd, (pendingDashboardSpawns?.get(session.cwd) ?? 0) + 1);
       }
+      clearForkResuming();
       if (!spawnResult.success) {
         reply.code(500);
         return { success: false, error: spawnResult.message } satisfies ApiResponse;

@@ -3,7 +3,7 @@ import { EmptyState } from "@blackbelt-technology/pi-dashboard-client-utils/Empt
 import { Skeleton } from "@blackbelt-technology/pi-dashboard-client-utils/Skeleton";
 import { toolCallPrefKey } from "@blackbelt-technology/pi-dashboard-shared/display-prefs.js";
 import { isInputNeededTool } from "@blackbelt-technology/pi-dashboard-shared/input-needed-tools.js";
-import { mdiCheck, mdiChevronDown, mdiChevronUp, mdiClose, mdiContentCopy, mdiLoading, mdiSourceFork, mdiTextBox } from "@mdi/js";
+import { mdiCheck, mdiChevronDown, mdiChevronUp, mdiClose, mdiContentCopy, mdiLoading, mdiTextBox } from "@mdi/js";
 import { Icon } from "@mdi/react";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -33,6 +33,7 @@ import { ChangeSummaryBlock } from "./ChangeSummaryBlock.js";
 import { CollapsedToolGroup } from "./CollapsedToolGroup.js";
 import { CommandFeedbackCard } from "./CommandFeedbackCard.js";
 import { CopyButton } from "./CopyButton.js";
+import { ForkFromHereButton } from "./ForkFromHereButton.js";
 import { MissingToolInlineError } from "./chat/MissingToolInlineError.js";
 import { FilePreviewHost, FilePreviewProvider } from "./FilePreviewContext.js";
 import { ImageLightbox } from "./ImageLightbox.js";
@@ -251,15 +252,7 @@ function MessageBubble({ content, className, timestamp, entryId, onFork, context
         )}
         <CopyButton getText={() => content} icon={<Icon path={mdiContentCopy} size={0.6} />} title={i18nT("common.copyAsMarkdown", undefined, "Copy as Markdown")} />
         <CopyButton getText={getPlainText} icon={<Icon path={mdiTextBox} size={0.6} />} title={i18nT("common.copyAsPlainText", undefined, "Copy as plain text")} />
-        {entryId && onFork && (
-          <button
-            onClick={() => onFork(entryId)}
-            title={i18nT("session.forkFromHere", undefined, "Fork from here")}
-            className="p-0.5 rounded hover:bg-[var(--bg-secondary)] text-[var(--text-secondary)]"
-          >
-            <Icon path={mdiSourceFork} size={0.6} />
-          </button>
-        )}
+        {entryId && onFork && <ForkFromHereButton entryId={entryId} onFork={onFork} />}
       </div>
     </div>
   );

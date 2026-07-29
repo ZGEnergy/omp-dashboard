@@ -32,6 +32,7 @@ Files in this directory. One row per source file.
 | `CopyButton.tsx` | Clipboard copy button with copied-state check icon. Exports `CopyButton`. Calls `navigator.clipboard.writeText`; resets state after 1500ms. Fails silently when Clipboard API unavailable. |
 | `CountBadges.tsx` | Shared `+adds −dels` count badges. See change: add-change-summary-table. |
 | `CwdGonePill.tsx` | Red `cwd gone` pill next to `WorktreePill` when `session.cwdMissing`. See change: add-worktree-lifecycle-actions. |
+| `ForkFromHereButton.tsx` | Per-message fork control shared by `ChatView` + `SkillInvocationCard` (identical markup before). Exports `ForkFromHereButton({entryId, onFork})`. Reads `useForkPending()`: pending → `mdiLoading` + `animate-spin`, `disabled`, title `session.forking`. `data-testid="fork-from-here-btn"`. See change: fork-action-opens-an-empty-chat. |
 | `DashboardSpawnButtons.tsx` | Sidebar spawn-button stack. Exports `DashboardSpawnButtons`. → see `DashboardSpawnButtons.tsx.AGENTS.md` |
 | `DiagnosticsSection.tsx` | Settings → Diagnostics. Fetches `/api/doctor`. Groups by section in fixed order, omits empty sections (no n/a… → see `DiagnosticsSection.tsx.AGENTS.md` |
 | `DialogPortal.tsx` | Re-export shim. Forwards to `@blackbelt-technology/pi-dashboard-client-utils/DialogPortal`. Symbol moved in change `complete-flows-plugin-migration` (Layer 0). |
@@ -71,7 +72,7 @@ Files in this directory. One row per source file.
 | `MergeConfirmDialog.tsx` | Fetches `/api/git/worktree/diff-stat`; renders 5-line summary; delete-branch checkbox. → see `MergeConfirmDialog.tsx.AGENTS.md` |
 | `MermaidBlock.tsx` | Renders fenced mermaid blocks via lazy `mermaid.render()`. → see `MermaidBlock.tsx.AGENTS.md` |
 | `MissingRequiredBanner.tsx` | Top banner for missing `required` recommended extensions (`useRecommendedExtensions`). → see `MissingRequiredBanner.tsx.AGENTS.md` |
-| `MobileActionMenu.tsx` | Kebab session-action menu for mobile. Rows: rename, hide/unhide, resume/fork, OpenSpec… Native-editor rows removed (change: remove-external-editor-integration). → see `MobileActionMenu.tsx.AGENTS.md` |
+| `MobileActionMenu.tsx` | Kebab session-action menu for mobile. Rows: rename, hide/unhide, resume/fork, OpenSpec… Native-editor rows removed (change: remove-external-editor-integration). → see `MobileActionMenu.tsx.AGENTS.md` Fork control reads `useForkPending()`: while a fork is in flight it is `disabled` with a `mdiLoading`/`animate-spin` icon and the `session.forking` title. See change: fork-action-opens-an-empty-chat. |
 | `MobileOverlay.tsx` | Mobile sidebar overlay (`md:hidden`): fixed backdrop + left 72-width panel. Exports `HamburgerButton` (menu trigger) and `MobileOverlay`. |
 | `MobileShell.tsx` | Two-panel mobile shell (list + detail) with CSS-transform slide transitions and `useSwipeBack` (finger-tracked transform). Depth 0=list, 1=detail, 2=preview reuses detail panel. Exports `MobileShell`. |
 | `ModelProxySection.tsx` | Settings panel section for model proxy. Exports `ModelProxySection`, `ModelProxyConfig`. → see `ModelProxySection.tsx.AGENTS.md` |

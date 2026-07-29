@@ -5,4 +5,4 @@ Gates both `<ContextUsageBar>` mounts on `useDisplayPrefs(session.id).contextUsa
 
 Accepts `hasNotice?: boolean` prop; threads into `deriveDotColorWithFlags`/`deriveStatusShape`/`deriveRailBgColor` flags. Renders non-error `notice` status ("model returned only reasoning, no answer") distinct from error. See change: fix-gemini-subagent-silent-tool-schema-failure.
 
-Renders compact read-only `<TagStrip tags phase={openspecPhase}>` (user chips + `+N` overflow + read-only phase chip) after the OpenSpec activity badge, in both mobile-compact and desktop layouts. See change: add-session-tags.
+Renders compact read-only `<TagStrip tags phase={openspecPhase}>` (user chips + `+N` overflow + read-only phase chip) after the OpenSpec activity badge, in both mobile-compact and desktop layouts. See change: add-session-tags. Fork control reads `useForkPending()`: while a fork is in flight it is `disabled` with a `mdiLoading`/`animate-spin` icon and the `session.forking` title. See change: fork-action-opens-an-empty-chat.

@@ -19,6 +19,7 @@ function makeSession(id: string, cwd: string): DashboardSession {
 
 function setup(pending: Map<string, { cwd: string; kind: "spawn" | "resume"; placeholderCwd?: string }>) {
   const navigate = vi.fn();
+  const settleFork = vi.fn();
   const showToast = vi.fn();
   const setResumeErrors = vi.fn();
   const setters: any = {
@@ -42,6 +43,7 @@ function setup(pending: Map<string, { cwd: string; kind: "spawn" | "resume"; pla
     selectedSessionIdRef: { current: undefined },
     pendingSpawnsRef: { current: pending },
     showToast,
+    settleFork,
   };
   const { result } = renderHook(() => useMessageHandler(setters, deps));
   return {
@@ -49,6 +51,7 @@ function setup(pending: Map<string, { cwd: string; kind: "spawn" | "resume"; pla
     navigate,
     showToast,
     setResumeErrors,
+    settleFork,
     pending,
   };
 }
@@ -80,5 +83,64 @@ describe("useMessageHandler — fork result", () => {
 
     expect(showToast).toHaveBeenCalledWith("Fork from entry failed: Entry ID not found", "error");
     expect(setResumeErrors).toHaveBeenCalled();
+  });
+
+  // Issue #107. `settleFork` is the single clear-path for the fork-pending
+  // spinner AND for the source session's optimistic `resuming` flag. Fork
+  // leaves the source session alive, so if either arm skipped this the
+  // source's Resume/Fork buttons would stay disabled forever.
+  describe("fork-pending settle", () => {
+    it("settles on the FAILURE arm", () => {
+      const { dispatch, settleFork } = setup(new Map());
+      dispatch({
+        type: "resume_result", success: false, sessionId: "s1",
+        message: "nope", requestId: "rq_f",
+      } as ServerToBrowserMessage);
+      expect(settleFork).toHaveBeenCalledWith("rq_f");
+    });
+
+    it("settles on the SUCCESS arm", () => {
+      const { dispatch, settleFork } = setup(new Map());
+      dispatch({
+        type: "resume_result", success: true, sessionId: "s1",
+        message: "ok", requestId: "rq_s",
+      } as ServerToBrowserMessage);
+      expect(settleFork).toHaveBeenCalledWith("rq_s");
+    });
+
+    it("settles on the correlated session_added", () => {
+      const pending = new Map([["rq_a", { cwd: "", kind: "resume" as const }]]);
+      const { dispatch, settleFork } = setup(pending);
+      dispatch({
+        type: "session_added", session: makeSession("fork-3", "/repo"), spawnRequestId: "rq_a",
+      } as ServerToBrowserMessage);
+      expect(settleFork).toHaveBeenCalledWith("rq_a");
+    });
+
+    it("does nothing when resume_result carries no requestId", () => {
+      const { dispatch, settleFork } = setup(new Map());
+      dispatch({
+        type: "resume_result", success: true, sessionId: "s1", message: "ok",
+      } as ServerToBrowserMessage);
+      expect(settleFork).not.toHaveBeenCalled();
+    });
+  });
+
+  it("renders the localized toast for code FORK_SOURCE_UNAVAILABLE", () => {
+    const { dispatch, showToast } = setup(new Map());
+
+    dispatch({
+      type: "resume_result",
+      success: false,
+      sessionId: "s1",
+      code: "FORK_SOURCE_UNAVAILABLE",
+      message: "Can't fork — pi's transcript file for this session is no longer on disk.",
+      requestId: "rq_u",
+    } as ServerToBrowserMessage);
+
+    expect(showToast).toHaveBeenCalledWith(
+      expect.stringMatching(/no longer on disk/i),
+      "error",
+    );
   });
 });

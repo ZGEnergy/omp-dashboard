@@ -132,18 +132,32 @@ export function createBranchedSessionFile(sessionFilePath: string, targetEntryId
   const content = readFileSync(sessionFilePath, "utf-8");
   const allLines: string[] = content.trim().split("\n").filter(l => l.trim());
   const allEntries: SessionEntry[] = [];
+  const rawLines: string[] = [];
   for (const line of allLines) {
-    try { allEntries.push(JSON.parse(line)); } catch { /* skip */ }
+    try {
+      allEntries.push(JSON.parse(line));
+      rawLines.push(line);
+    } catch { /* skip */ }
   }
 
   if (allEntries.length === 0) throw new Error("Empty session file");
 
-  const header = allEntries[0];
-  if (header.type !== "session") throw new Error("Invalid session file: missing header");
+  // Pi writes a `{"type":"title",…}` preamble record BEFORE the canonical
+  // `session` header (verified against every current-format file on disk), so
+  // the header is not always at index 0. Use the same skip `loadSessionEntries`
+  // does. The preamble lines are re-emitted verbatim: the title record carries a
+  // fixed-width `pad` slot pi rewrites in place, so it must survive byte-for-byte.
+  const headerIndex = allEntries.findIndex(
+    (entry) => entry.type === "session" && typeof entry.id === "string",
+  );
+  if (headerIndex < 0) throw new Error("Invalid session file: missing header");
 
-  // Build index
+  const header = allEntries[headerIndex];
+  const preambleLines = rawLines.slice(0, headerIndex);
+
+  // Build index (post-header entries only)
   const byId = new Map<string, SessionEntry>();
-  for (const entry of allEntries) {
+  for (const entry of allEntries.slice(headerIndex)) {
     if (entry.type === "session") continue;
     if (entry.id) byId.set(entry.id, entry);
   }
@@ -162,7 +176,7 @@ export function createBranchedSessionFile(sessionFilePath: string, targetEntryId
 
   // Write new session file: header + branch entries (with linearized parentId chain)
   const newHeader = { ...header, id: randomUUID(), parentSession: sessionFilePath };
-  const lines: string[] = [JSON.stringify(newHeader)];
+  const lines: string[] = [...preambleLines, JSON.stringify(newHeader)];
   for (let i = 0; i < branch.length; i++) {
     const entry = { ...branch[i], parentId: i === 0 ? null : branch[i - 1].id };
     lines.push(JSON.stringify(entry));

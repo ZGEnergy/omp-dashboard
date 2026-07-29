@@ -50,6 +50,7 @@ import {
   mdiEyeOffOutline,
   mdiEyeOutline,
   mdiFileDocumentOutline,
+  mdiLoading,
   mdiPlay,
   mdiPlayCircleOutline,
   mdiPlus,
@@ -61,6 +62,7 @@ import {
 import { Icon } from "@mdi/react";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useForkPending } from "../lib/ForkPendingContext.js";
 import { formatRelativeTime, formatTokens } from "../lib/format.js";
 import { t as i18nT } from "../lib/i18n";
 import { computeReorder, orderChangesForGroup } from "../lib/openspec-board-order.js";
@@ -788,6 +790,8 @@ function BoardSessionRow({
   const isHidden = !!s.hidden;
   const isAlive = s.status !== "ended";
   const hasFile = !!s.sessionFile;
+  // Fork feedback + duplicate guard. See change: fork-action-opens-an-empty-chat.
+  const forkPending = useForkPending()(s.id);
   const showResume = hasFile && (!isAlive || isHidden);
   const iconColor = deriveIconStatusColor(deriveDotColor(s), s.status);
   const pulse = pulseClassForStatus(s);
@@ -819,7 +823,7 @@ function BoardSessionRow({
             <button title={i18nT("session.resumeContinueSession", undefined, "Resume / continue session")} onClick={() => onResumeSession(s.id, "continue")} className="text-[var(--text-muted)] hover:text-green-400"><Icon path={mdiPlayCircleOutline} size={0.42} /></button>
           )}
           {hasFile && (
-            <button title={i18nT("session.forkSession", undefined, "Fork session")} onClick={() => onResumeSession(s.id, "fork")} className="text-[var(--text-muted)] hover:text-blue-400"><Icon path={mdiSourceFork} size={0.42} /></button>
+            <button title={forkPending ? i18nT("session.forking", undefined, "Forking…") : i18nT("session.forkSession", undefined, "Fork session")} onClick={() => onResumeSession(s.id, "fork")} disabled={forkPending || !!s.resuming} className="text-[var(--text-muted)] hover:text-blue-400 disabled:cursor-default disabled:opacity-60"><Icon path={forkPending ? mdiLoading : mdiSourceFork} size={0.42} className={forkPending ? "animate-spin" : undefined} /></button>
           )}
           {isHidden
             ? <button title={i18nT("session.showSession", undefined, "Show session")} onClick={() => onUnhideSession(s.id)} className="text-[var(--text-muted)] hover:text-green-400"><Icon path={mdiEyeOutline} size={0.42} /></button>

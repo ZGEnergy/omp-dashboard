@@ -22,7 +22,15 @@ export function sendStateSync(
   const model = getCurrentModelString(bc);
   const thinkingLevel = (bc.pi as any).getThinkingLevel?.() ?? undefined;
 
-  const sessionFile = bc.lastSessionFile ?? bc.cachedCtx?.sessionManager?.getSessionFile?.() ?? undefined;
+  // Prefer the LIVE getter over `bc.lastSessionFile`. That cache is captured
+  // once at extension load (`bridge.ts`) and refreshed only in
+  // `handleSessionChange`, so a pi-side session-file rotation that fires no
+  // session-change event left the server holding a path that no longer exists
+  // — which routed fork into the "no persisted history" degrade and opened a
+  // blank chat (issue #107). The cache is now only a fallback for when the
+  // getter is unavailable. `lastSessionDir` is deliberately untouched.
+  // See change: fork-action-opens-an-empty-chat.
+  const sessionFile = bc.cachedCtx?.sessionManager?.getSessionFile?.() ?? bc.lastSessionFile ?? undefined;
   const sessionDir = bc.lastSessionDir ?? bc.cachedCtx?.sessionManager?.getSessionDir?.() ?? undefined;
   const firstMessage = extractFirstMessage(bc.cachedCtx);
 

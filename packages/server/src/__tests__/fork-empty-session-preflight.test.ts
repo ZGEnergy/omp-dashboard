@@ -1,9 +1,20 @@
 /**
  * Tests for the fork-empty-session silent-degrade path in `handleResumeSession`.
  *
- * When the source session has no on-disk JSONL, fork SHALL silently spawn a
- * fresh session in the same cwd, inherit the parent's `attachedProposal`,
- * and emit `resume_result` with `code: "FORK_DEGRADED_TO_NEW"`.
+ * CONTRACT NARROWED (issue #107, change: fork-action-opens-an-empty-chat).
+ * These cases used to assert the degrade for ANY missing on-disk JSONL. That
+ * was the bug: a session full of conversation whose file pi had rotated away
+ * got a blank chat and a "no persisted history" message. The degrade now
+ * requires BOTH a missing file AND no content signal, so every fixture below
+ * carries the no-content markers explicitly — that is what keeps it on this
+ * branch. The content-bearing counterpart lives in
+ * `fork-source-unavailable.test.ts`.
+ *
+ * Unchanged contract: an EMPTY session (nothing persisted yet) forked SHALL
+ * silently spawn a fresh session in the same cwd, inherit the parent's
+ * `attachedProposal`, and emit `resume_result` with
+ * `code: "FORK_DEGRADED_TO_NEW"` — rather than hand `pi --fork` a path that
+ * does not exist and hang 30 s on the spawn-register watchdog.
  *
  * See change: fix-fork-empty-session-silent-timeout.
  */
@@ -90,6 +101,8 @@ describe("handleResumeSession: fork-empty-session silent-degrade", () => {
       status: "active",
       sessionFile: "/path/that/does/not/exist.jsonl",
       resuming: false,
+      // No content — this is what keeps it on the degrade branch.
+      tokensIn: 0, tokensOut: 0, contextTokens: 0, firstMessage: undefined,
     };
     const sent: any[] = [];
     const { ctx } = makeCtx(session, sent);
@@ -132,6 +145,7 @@ describe("handleResumeSession: fork-empty-session silent-degrade", () => {
       sessionFile: "/proj/missing.jsonl",
       attachedProposal: "feature-x",
       resuming: false,
+      tokensIn: 0, tokensOut: 0, contextTokens: 0, firstMessage: undefined,
     };
     const sent: any[] = [];
     const { ctx, enqueue } = makeCtx(session, sent);
@@ -159,6 +173,7 @@ describe("handleResumeSession: fork-empty-session silent-degrade", () => {
       sessionFile: "/proj/missing.jsonl",
       attachedProposal: undefined,
       resuming: false,
+      tokensIn: 0, tokensOut: 0, contextTokens: 0, firstMessage: undefined,
     };
     const sent: any[] = [];
     const { ctx, enqueue } = makeCtx(session, sent);
@@ -251,6 +266,7 @@ describe("handleResumeSession: fork-empty-session silent-degrade", () => {
       status: "active",
       sessionFile: "/missing.jsonl",
       resuming: false,
+      tokensIn: 0, tokensOut: 0, contextTokens: 0, firstMessage: undefined,
     };
     const sent: any[] = [];
     const { ctx } = makeCtx(session, sent);

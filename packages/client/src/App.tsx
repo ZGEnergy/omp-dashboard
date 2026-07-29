@@ -149,6 +149,7 @@ import { useViewDispatcher } from "./hooks/useViewDispatcher.js";
 import { ApiContext, deriveApiBase, setGlobalApiBase, VITE_API_URL } from "./lib/api-context.js";
 import { buildContextUsageMap } from "./lib/context-usage.js";
 import { DisplayPrefsProvider } from "./lib/DisplayPrefsContext.js";
+import { ForkPendingProvider, useForkPendingController } from "./lib/ForkPendingContext.js";
 import { registerPluginCatalog, useI18n } from "./lib/i18n.js";
 import { mergeReplayWindow, type ReplayWindow } from "./lib/replay-window.js";
 import { SessionAssetsProvider } from "./lib/SessionAssetsContext.js";
@@ -637,6 +638,21 @@ export default function App() {
   // Lives alongside `spawningCwds` (which keeps placeholder + disabled-button
   // behavior cwd-keyed). See change: spawn-correlation-token.
   const pendingSpawnsRef = useRef<Map<string, { cwd: string; kind: "spawn" | "resume"; placeholderCwd?: string }>>(new Map());
+  // Fork-pending signal shared by all five fork controls (spinner + disabled)
+  // and the single client-side duplicate-activation guard. On every settle
+  // path it also clears the SOURCE session's optimistic `resuming` flag —
+  // fork leaves that session alive, so nothing else ever would.
+  // See change: fork-action-opens-an-empty-chat.
+  const clearSourceResuming = useCallback((sessionId: string) => {
+    setSessions((prev) => {
+      const existing = prev.get(sessionId);
+      if (!existing?.resuming) return prev;
+      const next = new Map(prev);
+      next.set(sessionId, { ...existing, resuming: false });
+      return next;
+    });
+  }, []);
+  const { pendingKeys: forkPendingKeys, beginFork, settleFork } = useForkPendingController(clearSourceResuming);
   const [sessionOrderMap, setSessionOrderMap] = useState<Map<string, string[]>>(new Map());
   const [pinnedDirectories, setPinnedDirectories] = useState<string[]>([]);
   // Flipped true on the first `pinned_dirs_updated` (server sends it on
@@ -1206,7 +1222,7 @@ export default function App() {
 
   const handleMessage = useMessageHandler(
     { setSessions, setSessionStates, setSessionCommands, setFileResults, setChangedOnDisk, setOpenspecMap, setFolderGitMap, setOpenspecGroupsMap, setModelsMap, setRolesMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setPinnedDirsLoaded, setFavoriteModels, setWorkspaces, setTerminals, setDiscoveredServers, setSpawnErrors, setResumeErrors, setDisplayPrefs, setViewMessagesMap, setLoadingHistory, setCanvasMap },
-    { send, navigate, clearSpawningCwd, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, lastCreatedTerminalIdRef, maxSeqMapRef, selectedSessionIdRef, pendingSpawnsRef, cwdVisibilityInputsRef, loadingHistoryTimersRef, showToast, historyWindowRef, setHistoryWindowMap, setLoadingOlderMap, replayController },
+    { send, navigate, clearSpawningCwd, spawningCwdsRef, subscribedRef, pendingTerminalCwdRef, lastCreatedTerminalIdRef, maxSeqMapRef, selectedSessionIdRef, pendingSpawnsRef, cwdVisibilityInputsRef, loadingHistoryTimersRef, showToast, historyWindowRef, setHistoryWindowMap, setLoadingOlderMap, replayController, settleFork },
   );
   const handleAuthorityMessage = useCallback((msg: ServerToBrowserMessage) => {
     handleMessage(msg);
@@ -1635,7 +1651,7 @@ export default function App() {
     selectedId, send, navigate, setMobileOpen,
     sessions, setSessions, setSessionStates, setSpawningCwds, setTerminals,
     clearSpawningCwd, spawnTimeoutsRef, pendingTerminalCwdRef, terminals,
-    pendingSpawnsRef,
+    pendingSpawnsRef, beginFork,
   });
   const {
     // Queue-mutation action senders removed entirely (pi exposes no mutation
@@ -2448,6 +2464,7 @@ export default function App() {
 
   const apiProvider = (children: React.ReactNode) => (
     <ApiContext.Provider value={apiBase}>
+      <ForkPendingProvider pendingKeys={forkPendingKeys}>
       <DisplayPrefsProvider value={displayPrefsContextValue}>
       <CommitDialogProvider onCommitted={(shortHash, cwd) => { showToast(`Committed ${shortHash}`); void refreshGitStatus(cwd); }}>
       <PluginContextProvider
@@ -2521,6 +2538,7 @@ export default function App() {
       </PluginContextProvider>
       </CommitDialogProvider>
       </DisplayPrefsProvider>
+      </ForkPendingProvider>
     </ApiContext.Provider>
   );
 

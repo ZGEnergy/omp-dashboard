@@ -14,6 +14,7 @@ import {
 } from "@blackbelt-technology/pi-dashboard-shared/platform/process-identify.js";
 import { keeperOptsFromSpawnResult } from "../headless-pid-registry.js";
 import { spawnPiSession } from "../process-manager.js";
+import { sessionHasForkableContent } from "../session-content.js";
 import { createBranchedSessionFile } from "../session-file-reader.js";
 import { appendSpawnFailure } from "../spawn-failure-log.js";
 import { preflightSpawn } from "../spawn-preflight.js";
@@ -34,6 +35,23 @@ import { shouldInterceptReload } from "./session-action-helpers.js";
 export const FORK_DEGRADED_TO_NEW_MESSAGE =
   "Started a fresh session \u2014 the source had no persisted history to fork from.";
 export const FORK_DEGRADED_TO_NEW_CODE = "FORK_DEGRADED_TO_NEW";
+
+/**
+ * Status message + code emitted when fork is attempted on a session that HAS
+ * conversation content but whose `.jsonl` is no longer on disk (pi rotated or
+ * rewrote it, or the bridge reported a stale path). Previously this took the
+ * degrade branch above and silently opened a blank chat \u2014 issue #107.
+ *
+ * There is nothing honest to spawn here: `pi --fork` consumes an on-disk
+ * JSONL and the dashboard's own event store is not in that format. So we
+ * spawn NOTHING and fail loudly; the client's existing `resume_result` error
+ * toast surfaces it. Materializing a JSONL from the dashboard event store is
+ * deliberately out of scope (see the issue's follow-up).
+ * See change: fork-action-opens-an-empty-chat.
+ */
+export const FORK_SOURCE_UNAVAILABLE_MESSAGE =
+  "Can't fork \u2014 pi's transcript file for this session is no longer on disk.";
+export const FORK_SOURCE_UNAVAILABLE_CODE = "FORK_SOURCE_UNAVAILABLE";
 
 /**
  * Find headless pi PIDs associated with a session-id marker and kill them.
@@ -270,7 +288,7 @@ export async function handleResumeSession(
   msg: Extract<BrowserToServerMessage, { type: "resume_session" }>,
   ctx: BrowserHandlerContext,
 ): Promise<void> {
-  const { ws, sessionManager, pendingForkRegistry, headlessPidRegistry, pendingDashboardSpawns, pendingResumeIntents, pendingClientCorrelations, sendTo } = ctx;
+  const { ws, sessionManager, broadcast, pendingForkRegistry, headlessPidRegistry, pendingDashboardSpawns, pendingResumeIntents, pendingClientCorrelations, sendTo } = ctx;
   const session = sessionManager.get(msg.sessionId);
   if (!session) {
     sendTo(ws, { type: "resume_result", sessionId: msg.sessionId, success: false, message: "Session not found", code: "resume.session_not_found", requestId: msg.requestId });
@@ -289,19 +307,68 @@ export async function handleResumeSession(
     sendTo(ws, { type: "resume_result", sessionId: msg.sessionId, success: false, message: "Session is already active", code: "resume.already_active", requestId: msg.requestId });
     return;
   }
+  // Duplicate-activation guard. Previously DEAD for browser-initiated forks:
+  // nothing on this path ever set `resuming`, so every rapid double-click
+  // spawned another pi. `mode === "fork"` now arms it just below.
+  // See change: fork-action-opens-an-empty-chat.
   if (session.resuming) {
     sendTo(ws, { type: "resume_result", sessionId: msg.sessionId, success: false, message: "Session is already being resumed", code: "resume.already_resuming", requestId: msg.requestId });
     return;
   }
-  // Fork preflight: silent-degrade when the source session has no on-disk
-  // JSONL yet (empty session, no persisted entries). `pi --fork <missing>`
-  // would crash silently and produce a 30s register-timeout; instead we
-  // spawn a fresh pi in the same cwd and surface `code: FORK_DEGRADED_TO_NEW`
-  // so the client can render a non-blocking toast. The parent's
-  // attachedProposal (if any) is inherited via `pendingAttachRegistry`
-  // since fork's own inheritance path doesn't run on this branch.
-  // See change: fix-fork-empty-session-silent-timeout.
+
+  // Fork sets `resuming` on the SOURCE session, which stays alive — so unlike
+  // `continue` (cleared by `browser-gateway.ts` on timeout / `event-wiring.ts`
+  // on ended→alive) nothing downstream would ever clear it. Every fork exit
+  // below therefore goes through `finishFork`, which clears the flag BEFORE
+  // sending `resume_result`. Otherwise the source card's Resume/Fork buttons
+  // stay disabled forever. `continue` semantics are untouched.
+  const isFork = msg.mode === "fork";
+  if (isFork) {
+    sessionManager.update(msg.sessionId, { resuming: true });
+    broadcast({ type: "session_updated", sessionId: msg.sessionId, updates: { resuming: true } });
+  }
+  const finishFork = (result: {
+    success: boolean;
+    message: string;
+    code?: string;
+  }): void => {
+    if (isFork) {
+      sessionManager.update(msg.sessionId, { resuming: false });
+      broadcast({ type: "session_updated", sessionId: msg.sessionId, updates: { resuming: false } });
+    }
+    sendTo(ws, {
+      type: "resume_result",
+      sessionId: msg.sessionId,
+      success: result.success,
+      message: result.message,
+      requestId: msg.requestId,
+      ...(result.code ? { code: result.code } : {}),
+    });
+  };
+
+  // Fork preflight: the source session's `.jsonl` is not on disk. Two very
+  // different situations share that symptom, and conflating them was issue
+  // #107 — a content-rich session whose file pi had rotated away silently
+  // opened a blank chat.
+  //
+  //  - No content (freshly-spawned session, nothing persisted yet): degrade
+  //    to a plain fresh spawn in the same cwd with `FORK_DEGRADED_TO_NEW`.
+  //    "fork" and "new" mean the same thing here, and `pi --fork <missing>`
+  //    would otherwise crash silently into a 30 s register-timeout. The
+  //    parent's attachedProposal (if any) is inherited via
+  //    `pendingAttachRegistry` since fork's own inheritance path doesn't run
+  //    on this branch. See change: fix-fork-empty-session-silent-timeout.
+  //  - Has content: spawn NOTHING and fail loudly with
+  //    `FORK_SOURCE_UNAVAILABLE`. See change: fork-action-opens-an-empty-chat.
   if (msg.mode === "fork" && session.sessionFile && !existsSync(session.sessionFile)) {
+    if (sessionHasForkableContent(session)) {
+      finishFork({
+        success: false,
+        message: FORK_SOURCE_UNAVAILABLE_MESSAGE,
+        code: FORK_SOURCE_UNAVAILABLE_CODE,
+      });
+      return;
+    }
     // Inherit attachedProposal from parent so the new session still
     // tracks the change the user was working on.
     const pendingAttachRegistry = ctx.pendingAttachRegistry;
@@ -331,12 +398,9 @@ export async function handleResumeSession(
         (pendingDashboardSpawns?.get(session.cwd) ?? 0) + 1,
       );
     }
-    sendTo(ws, {
-      type: "resume_result",
-      sessionId: msg.sessionId,
+    finishFork({
       success: degradeResult.success,
       message: degradeResult.success ? FORK_DEGRADED_TO_NEW_MESSAGE : degradeResult.message,
-      requestId: msg.requestId,
       ...(degradeResult.success ? { code: FORK_DEGRADED_TO_NEW_CODE } : {}),
     });
     return;
@@ -347,7 +411,7 @@ export async function handleResumeSession(
     try {
       forkSessionFile = createBranchedSessionFile(session.sessionFile, msg.entryId);
     } catch (err: any) {
-      sendTo(ws, { type: "resume_result", sessionId: msg.sessionId, success: false, message: `Fork from entry failed: ${err.message}`, requestId: msg.requestId });
+      finishFork({ success: false, message: `Fork from entry failed: ${err.message}` });
       return;
     }
   }
@@ -389,7 +453,7 @@ export async function handleResumeSession(
       keeperOptsFromSpawnResult(result),
     );
   }
-  sendTo(ws, { type: "resume_result", sessionId: msg.sessionId, success: result.success, message: result.message, requestId: msg.requestId });
+  finishFork({ success: result.success, message: result.message });
 }
 
 export async function handleSpawnSession(

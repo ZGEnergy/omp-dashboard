@@ -172,6 +172,14 @@ export interface MessageHandlerDeps {
    * reset, live event, and correlated asset frames must not fall through to
    * legacy reducer/persister/plugin side effects. */
   replayController?: Pick<SessionReplayController, "handle">;
+  /**
+   * Settles the fork-pending signal for a `requestId` (no-op for requestIds
+   * that were not forks). Called on BOTH `resume_result` arms and on the
+   * correlated `session_added`, so no fork control can be left spinning.
+   * Optional — absent means no fork-pending UI is mounted.
+   * See change: fork-action-opens-an-empty-chat.
+   */
+  settleFork?: (requestId: string) => void;
 }
 
 export function useMessageHandler(
@@ -203,6 +211,7 @@ export function useMessageHandler(
     setHistoryWindowMap,
     setLoadingOlderMap,
     replayController,
+    settleFork,
   } = deps;
   // One-shot per session: suppress a repeat auto-name toast for the same
   // session id. See change: add-auto-session-naming.
@@ -320,6 +329,9 @@ export function useMessageHandler(
           if (msg.spawnRequestId && pendingSpawnsRef.current.has(msg.spawnRequestId)) {
             const entry = pendingSpawnsRef.current.get(msg.spawnRequestId)!;
             pendingSpawnsRef.current.delete(msg.spawnRequestId);
+            // The fork landed — stop the spinner even if `resume_result`
+            // never arrives. See change: fork-action-opens-an-empty-chat.
+            settleFork?.(msg.spawnRequestId);
             // Clear the placeholder keyed on the group cwd. For a worktree
             // spawn `placeholderCwd` is the PARENT repo path (where the
             // session groups), NOT `entry.cwd` (the worktree path).
@@ -912,6 +924,14 @@ export function useMessageHandler(
       case "resume_result":
         // Resuming any session retires the recovery offer (no nag).
         if (msg.success) clearRecoveryOffer();
+        // Settle the fork-pending signal on BOTH arms. For a fork the
+        // optimistic `resuming: true` was set on the SOURCE session, which
+        // stays alive — nothing downstream would ever clear it, so the
+        // source's Resume/Fork buttons would stay disabled forever. The
+        // settle callback clears it. No-op when this requestId was not a
+        // fork, which leaves `continue`'s stay-disabled-until-alive
+        // semantics intact. See change: fork-action-opens-an-empty-chat.
+        if (msg.requestId) settleFork?.(msg.requestId);
         if (!msg.success) {
           console.warn("[dashboard] Resume/fork failed:", msg.message);
           setSessions((prev) => {
@@ -922,15 +942,24 @@ export function useMessageHandler(
             }
             return next;
           });
+          // FORK_SOURCE_UNAVAILABLE: the source session holds conversation
+          // but pi's transcript file for it is gone from disk, so there is
+          // nothing to fork. The server spawns nothing and says so; this used
+          // to silently open a blank chat (issue #107). Localize off the
+          // structured code; fall back to the server's own message.
+          // See change: fork-action-opens-an-empty-chat.
+          const resumeErrorText = msg.code === "FORK_SOURCE_UNAVAILABLE"
+            ? t("session.forkSourceUnavailable", undefined, msg.message ?? "Can't fork — pi's transcript file for this session is no longer on disk.")
+            : msg.message ?? t("session.resumeFailed", undefined, "Resume failed");
           setResumeErrors((prev) => {
             const next = new Map(prev);
-            next.set(msg.sessionId, msg.message ?? t("session.resumeFailed", undefined, "Resume failed"));
+            next.set(msg.sessionId, resumeErrorText);
             return next;
           });
           // Surface a failed fork/resume as a visible toast — the per-session
           // resumeErrors banner alone is easy to miss and makes a failed fork
           // look like an inert no-op. See change: fork-from-here-inert (#69).
-          showToast?.(msg.message ?? t("session.resumeFailed", undefined, "Resume failed"), "error");
+          showToast?.(resumeErrorText, "error");
           // Drop the pending-spawn entry on failure so a stale entry can't
           // mis-route a later session_added. See change: spawn-correlation-token.
           if (msg.requestId) pendingSpawnsRef.current.delete(msg.requestId);
@@ -1325,5 +1354,5 @@ export function useMessageHandler(
         break;
       }
     }
-  }, [send, clearSpawningCwd, navigate, setSessions, setSessionStates, setSessionCommands, setFileResults, setChangedOnDisk, setOpenspecMap, setModelsMap, setRolesMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setPinnedDirsLoaded, setFavoriteModels, setWorkspaces, setTerminals, setDiscoveredServers, setLoadingHistory, setCanvasMap, setHistoryWindowMap, setLoadingOlderMap, spawningCwdsRef, subscribedRef, maxSeqMapRef, selectedSessionIdRef, historyWindowRef, loadingHistoryTimersRef, replayPersister, flushLiveEvents, scheduleLiveFlush, showToast, replayController]);
+  }, [send, clearSpawningCwd, navigate, setSessions, setSessionStates, setSessionCommands, setFileResults, setChangedOnDisk, setOpenspecMap, setModelsMap, setRolesMap, setSpawnResult, setSessionOrderMap, setPinnedDirectories, setPinnedDirsLoaded, setFavoriteModels, setWorkspaces, setTerminals, setDiscoveredServers, setLoadingHistory, setCanvasMap, setHistoryWindowMap, setLoadingOlderMap, spawningCwdsRef, subscribedRef, maxSeqMapRef, selectedSessionIdRef, historyWindowRef, loadingHistoryTimersRef, replayPersister, flushLiveEvents, scheduleLiveFlush, showToast, replayController, settleFork]);
 }

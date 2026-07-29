@@ -11,6 +11,7 @@ import {
   mdiEyeOutline,
   mdiFastForward,
   mdiLinkVariant,
+  mdiLoading,
   mdiPencilOutline,
   mdiPlay,
   mdiPlayCircleOutline,
@@ -20,6 +21,7 @@ import {
 } from "@mdi/js";
 import { Icon } from "@mdi/react";
 import React, { useEffect, useRef, useState } from "react";
+import { useForkPending } from "../lib/ForkPendingContext.js";
 import { t as i18nT } from "../lib/i18n";
 import { DialogPortal } from "./DialogPortal.js";
 import { ExploreDialog } from "./ExploreDialog.js";
@@ -73,6 +75,9 @@ export function MobileActionMenu({ session, openspecChanges, onRename, onHide, o
 
   const isAlive = session.status !== "ended";
   const isHidden = !!session.hidden;
+  // Fork feedback + duplicate guard, keyed on sessionId (session-scoped fork,
+  // no entryId). See change: fork-action-opens-an-empty-chat.
+  const forkPending = useForkPending()(session.id);
 
   useEffect(() => {
     if (!open) return;
@@ -154,7 +159,7 @@ export function MobileActionMenu({ session, openspecChanges, onRename, onHide, o
               {(!isAlive || isHidden) && (
                 <MenuRow icon={mdiPlay} label={i18nT("session.resume", undefined, "Resume")} onClick={() => act(() => onResume("continue"))} />
               )}
-              <MenuRow icon={mdiSourceFork} label={i18nT("session.fork", undefined, "Fork")} onClick={() => act(() => onResume("fork"))} />
+              <MenuRow icon={forkPending ? mdiLoading : mdiSourceFork} label={forkPending ? i18nT("session.forking", undefined, "Forking…") : i18nT("session.fork", undefined, "Fork")} onClick={() => act(() => onResume("fork"))} disabled={forkPending || !!session.resuming} />
             </>
           )}
 

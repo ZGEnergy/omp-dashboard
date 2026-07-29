@@ -36,6 +36,15 @@ export interface SessionActionDeps {
    * See change: spawn-correlation-token.
    */
   pendingSpawnsRef: React.MutableRefObject<Map<string, { cwd: string; kind: "spawn" | "resume"; placeholderCwd?: string }>>;
+  /**
+   * Records an in-flight fork and returns `false` when one is already
+   * pending for the same key (`entryId` for fork-from-message, else
+   * `sessionId`) — the single client-side duplicate-activation guard for all
+   * five fork controls. Optional so callers that don't render fork controls
+   * (tests, embedders) need no wiring; absent = no dedup, today's behaviour.
+   * See change: fork-action-opens-an-empty-chat.
+   */
+  beginFork?: (key: string, sessionId: string, requestId: string) => boolean;
 }
 
 export function useSessionActions(deps: SessionActionDeps) {
@@ -43,7 +52,7 @@ export function useSessionActions(deps: SessionActionDeps) {
     selectedId, send, navigate, setMobileOpen,
     sessions, setSessions, setSessionStates, setSpawningCwds, setTerminals,
     clearSpawningCwd, spawnTimeoutsRef, pendingTerminalCwdRef, terminals,
-    pendingSpawnsRef,
+    pendingSpawnsRef, beginFork,
   } = deps;
 
   // Native crypto.randomUUID is widely available; fall back to a Math.random
@@ -271,24 +280,32 @@ export function useSessionActions(deps: SessionActionDeps) {
   );
 
   const handleResumeSession = useCallback((sessionId: string, mode: "continue" | "fork", entryId?: string) => {
+    // Mint the requestId up front so the fork-pending registration and the
+    // wire message share it. Fork-only duplicate guard: a second activation
+    // for the same key while the first is still in flight is dropped without
+    // sending, so a double-tap can't spawn two pi sessions. `continue` is
+    // untouched. See change: fork-action-opens-an-empty-chat.
+    const requestId = mintRequestId();
+    if (mode === "fork" && beginFork && !beginFork(entryId ?? sessionId, sessionId, requestId)) {
+      return;
+    }
     setSessions((prev) => {
       const next = new Map(prev);
       const existing = next.get(sessionId);
       if (existing) next.set(sessionId, { ...existing, resuming: true });
       return next;
     });
-    // Mint requestId so session_added (for fork mode) carries spawnRequestId
-    // and the client can auto-select the new fork. cwd is left empty here
+    // The requestId (minted above) rides on session_added as spawnRequestId
+    // so the client can auto-select the new fork. cwd is left empty here
     // because resume's parent-session lookup happens server-side; we only
     // need requestId for the eventual session_added match.
     // See change: spawn-correlation-token.
-    const requestId = mintRequestId();
     pendingSpawnsRef.current.set(requestId, { cwd: "", kind: "resume" });
     // Explicit "front" placement: matches today's default but makes the
     // intent visible at the wire level. See change:
     // differentiate-resume-intent-by-trigger.
     send({ type: "resume_session", sessionId, mode, placement: "front", requestId, ...(entryId ? { entryId } : {}) });
-  }, [send, setSessions, pendingSpawnsRef]);
+  }, [send, setSessions, pendingSpawnsRef, beginFork]);
 
   /**
    * Drag-to-resume entry point. The drop position was just persisted via
