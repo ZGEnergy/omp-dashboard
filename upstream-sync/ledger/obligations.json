@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "ledger_revision": "ledger-2026-07-21",
+  "ledger_revision": "ledger-2026-07-28",
   "obligations": [
     {
       "id": "zge-push-vapid",
@@ -87,6 +87,28 @@
       "review_date": "2026-07-21",
       "expiry": "2026-10-21",
       "recheck_trigger": "Any upstream sync, validator, ledger, approval, or executor behavior change.",
+      "status": "accepted",
+      "schema_version": "1.0"
+    },
+    {
+      "id": "quality-changed-oracle-base-branch",
+      "intent": "Keep the quality:changed oracle comparing against this fork's own default branch.",
+      "observable_contract": "biome check --changed resolves its comparison base from the fork's main branch and exits 0 on an empty changed-set, so tsc --noEmit and npm test always run.",
+      "origin_commit": "ce24296d35eef0c5483e92249e4088419c621c83",
+      "evidence": {
+        "behavior": ["biome.json"],
+        "test": ["scripts/__tests__/biome-vcs-config.test.mjs"],
+        "wiring": ["package.json"]
+      },
+      "scope": {
+        "paths": ["biome.json"],
+        "behaviors": ["quality-changed-oracle", "fork-default-branch"]
+      },
+      "dependency_roots": ["biome.json", "scripts/__tests__/biome-vcs-config.test.mjs"],
+      "owner": "ZGEnergy platform maintainers",
+      "review_date": "2026-10-28",
+      "expiry": "2027-01-28",
+      "recheck_trigger": "Any biome.json, quality-script, or branch-naming change, and every upstream sync that touches biome.json.",
       "status": "accepted",
       "schema_version": "1.0"
     }

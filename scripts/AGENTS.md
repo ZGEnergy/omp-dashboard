@@ -4,6 +4,7 @@ Files in this directory. One row per file. Non-source area (migrated from `docs/
 
 | File | Purpose |
 |------|---------|
+| `__tests__/biome-vcs-config.test.mjs` | Vitest guard: biome.json vcs.defaultBranch === "main" (not upstream's "develop"), quality:changed keeps --error-on-warnings + --no-errors-on-unmatched + tsc + npm test, fix:changed keeps --no-errors-on-unmatched. No git calls (CI checks out a detached PR ref). See change: fix-quality-changed-default-branch. |
 | `__tests__/install-managed-skill.test.mjs` | Vitest: managed skill `--check` drift, byte-identical `--install`, traversal rejection, symlink rejection, atomic replacement. |
 | `__tests__/ensure-gh-default.test.mjs` | Vitest: ensure-gh-default.cjs pins remote.origin.gh-resolved=base for ZGEnergy origin, no-ops when already base / non-ZGE origin / outside git. |
 | `__tests__/repair-meta-source.test.mjs` | Vitest unit tests for repair-meta-source.mjs. Asserts source:"dashboard" → cleaned (other fields preserved), source:"tui"/"cli"/"tmux"/absent → kept, malformed JSON counted as errors, idempotent re-run, --dry-run modifies nothing. |

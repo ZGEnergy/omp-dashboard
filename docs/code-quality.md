@@ -7,8 +7,8 @@ Static-analysis code quality via Biome. Ratchet model: rules graduate `off → w
 - Engine: Biome 2.5.1 (`@biomejs/biome`), root devDependency, pinned exact.
 - Config: `biome.json` at repo root.
 - Formatter: disabled. Avoids reformatting 1712 files. `indentStyle: "space"` set for when enabled.
-- VCS integration: `clientKind: git`, `useIgnoreFile: true`, `defaultBranch: "develop"`.
-- `develop` = repo integration branch. No `main` exists.
+- VCS integration: `clientKind: git`, `useIgnoreFile: true`, `defaultBranch: "main"`.
+- `main` = fork default branch. Upstream uses `develop`.
 
 ### Ignores
 
@@ -29,7 +29,7 @@ Static-analysis code quality via Biome. Ratchet model: rules graduate `off → w
 
 | Scope | Invocation | Effect |
 |---|---|---|
-| Goal loop | `biome check --changed --error-on-warnings --write` | warn+error both block on touched files |
+| Goal loop | `biome check --changed --error-on-warnings --write --no-errors-on-unmatched` | warn+error both block on touched files |
 | CI | `biome lint .` | only error-tier fails; warns annotate |
 | Cleanup | `biome lint <path> --only=<group>/<rule>` | scoped rule sweep |
 
@@ -97,12 +97,14 @@ Rule moves `warn → error` only after `biome lint . --only=<group>/<rule> --rep
 npm script `quality:changed`:
 
 ```
-biome check --changed --error-on-warnings --write && tsc --noEmit && npm test
+biome check --changed --error-on-warnings --write --no-errors-on-unmatched && tsc --noEmit && npm test
 ```
 
 - Single exit code = judge done/continue signal.
 - Exit 0 → achieved.
 - Non-zero → continue.
+- Empty changed-set exits 0 via `--no-errors-on-unmatched`; without flag biome errors "No files were processed" and short-circuits `tsc` + `npm test`.
+- Biome resolves `defaultBranch` as local git ref. Keep local `main` current: `git pull --ff-only` in primary checkout, else changed-set widens to drift.
 - Goal-plugin (`@ricoyudog/pi-goal-hermes`) judge reads it.
 
 ## Safe vs unsafe fixes
@@ -121,7 +123,7 @@ If `--write` marks rule FIXABLE but leaves it, fix unsafe.
 | Script | Command |
 |---|---|
 | `lint:biome` | `biome lint .` |
-| `fix:changed` | `biome check --changed --write` |
+| `fix:changed` | `biome check --changed --write --no-errors-on-unmatched` |
 | `quality:changed` | oracle above |
 | `quality:report` | `biome lint . --reporter=github` |
 | `lint` | `tsc --noEmit` (unchanged) |

@@ -8,8 +8,8 @@ TBD - created by archiving change add-code-quality-skill. Update Purpose after a
 The project SHALL provide a single `biome.json` that configures Biome for the
 monorepo. The formatter SHALL be disabled by default; when enabled it SHALL use
 space indentation. VCS integration SHALL be enabled with `clientKind: git`,
-`useIgnoreFile: true`, and `defaultBranch: develop` (the repo's integration
-branch; there is no `main`). The config SHALL ignore build
+`useIgnoreFile: true`, and `defaultBranch: main` (this fork's default
+branch). The config SHALL ignore build
 output (`dist/`, `**/dist/`, `*.tsbuildinfo`), generated plugin-registry output,
 and `openspec/changes/archive/**`. Rules SHALL be organized into tiers (high-signal
 Tier A, noisy-but-valuable Tier B, style/complexity Tier C), with accessibility
@@ -47,7 +47,8 @@ scopes by varying only the invocation flags.
 ### Requirement: Deterministic quality oracle script
 
 The project SHALL provide a `quality:changed` npm script that runs
-`biome check --changed --error-on-warnings --write`, then `tsc --noEmit`, then
+`biome check --changed --error-on-warnings --write --no-errors-on-unmatched`,
+then `tsc --noEmit`, then
 `npm test`, and exits with the first non-zero status. The existing `lint`
 (`tsc --noEmit`) script SHALL remain unchanged. The project SHALL also provide
 `lint:biome`, `fix:changed`, and `quality:report` scripts.
