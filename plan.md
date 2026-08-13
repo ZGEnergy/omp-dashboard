@@ -1,89 +1,113 @@
-# Implementation Plan: OMP Startup Extension Load Optimization (#113)
+# Implementation Plan - Fix ctx.ui re-patching stack overflow & self-cancellation (#115)
 
 ## Objective
+Fix issue #115 where `ctx.ui` prompt method patching runs on every `session_start` without idempotence. Subsequent runs capture previously patched wrapper methods as "originals", creating a deeply nested adapter wrapper chain equal in depth to the number of `session_start` invocations. When a prompt is presented, the chain recurses through prior `PromptBus` instances until a `RangeError: Maximum call stack size exceeded` occurs, which is caught and silently converted into a user `Cancelled` response.
 
-Address OMP extension load latency issue (#113) by removing the eager static import of `discoverDashboard` from `packages/extension/src/bridge.ts`. `discoverDashboard` statically pulls `@blackbelt-technology/pi-dashboard-shared/mdns-discovery.js`, which transitively imports `bonjour-service`, `multicast-dns`, and `dns-packet` during extension module evaluation on OMP boot.
+The fix makes original method capture idempotent per `ctx.ui` object identity using a `WeakMap` cache, attaches wrapper tags to patched methods, stops converting adapter errors to user cancellations in the TUI adapter, and logs adapter errors in `PromptBus`.
 
-The change defers importing `mdns-discovery.js` to runtime inside the `session_start` event handler right before calling `autoStartServer`. The plan includes:
-1. Landing the deferred import of `discoverDashboard` in `bridge.ts`.
-2. Adding a unit test in `packages/extension/src/__tests__/bridge-import-timing.test.ts` asserting that evaluating `bridge.ts` does not statically import `bonjour-service`.
-3. Adding a measurement script (`scripts/measure-module-eval.js`) and recording per-module evaluation timings in `docs/research-113-findings.md`, addressing #113's 3 open questions.
-4. Updating documentation indexes (`docs/AGENTS.md`).
+---
 
 ## Files to Modify
 
-1. `packages/extension/src/bridge.ts`
-   - Remove static value import of `discoverDashboard` from `@blackbelt-technology/pi-dashboard-shared/mdns-discovery.js`.
-   - Dynamically import `discoverDashboard` inside the `session_start` event handler immediately prior to calling `autoStartServer`.
-2. `docs/AGENTS.md`
-   - Register new findings document `docs/research-113-findings.md`.
+1. `packages/extension/src/prompt-bus.ts`
+   - Add `error?: string` to `PromptResponse` interface.
+   - Log adapter exceptions in `PromptBus.request()` instead of silently swallowing them.
+
+2. `packages/extension/src/bridge.ts`
+   - Import `getOrCreatePristineOriginals` from `./ctx-ui-originals.js`.
+   - Replace direct line ~2195 `originals` object creation in `session_start` with `getOrCreatePristineOriginals(ctx.ui)`.
+   - Attach `__isPromptBusWrapper = true` to all patched wrapper functions on `ctx.ui`.
+   - Update TUI adapter `catch` block (line ~2342) to respond with `{ id: prompt.id, cancelled: false, error: String(err), source: "tui" }` instead of `cancelled: true`.
+
+3. `packages/extension/src/__tests__/tui-prompt-adapter.test.ts`
+   - Update adapter error test cases if necessary to align with non-cancelling error response shape.
+
+---
 
 ## Files to Create
 
-1. `packages/extension/src/__tests__/bridge-import-timing.test.ts`
-   - Unit test verifying module graph import properties (e.g. checking module dependencies or loaded module cache after importing `bridge.ts` in isolation to confirm `bonjour-service` is not loaded statically).
-2. `scripts/measure-module-eval.js`
-   - Measurement script timing isolated module evaluation for `bridge.ts`, `bonjour-service`, `yaml`, `config.ts`, and `role-manager.ts` under Node/Bun.
-3. `docs/research-113-findings.md`
-   - Documented findings answering #113's 3 open questions based on module timing data and static import analysis, explicitly recording environment boundary notes for interactive PTY benchmarks.
+1. `packages/extension/src/ctx-ui-originals.ts`
+   - Export `PristineUiOriginals` interface.
+   - Maintain a module-level `WeakMap<object, PristineUiOriginals>` keyed by `ctx.ui`.
+   - Export `getOrCreatePristineOriginals(ui: any): PristineUiOriginals` which captures native `select`, `input`, `confirm`, `editor`, and `notify` bindings on first call and reuses stored pristine bindings on subsequent calls. Includes dev warning if initial capture detects `__isPromptBusWrapper`.
+
+2. `packages/extension/src/__tests__/ctx-ui-session-start-repatch-regression.test.ts`
+   - Unit tests covering:
+     a) Original function reference identity across multiple `session_start` / patch cycles on the same `ctx.ui`.
+     b) Prevention of recursion / `RangeError` when `ctx.ui.select` is invoked after 10+ re-patch runs.
+     c) Verification that a throwing adapter responds with `cancelled: false` and `error` message rather than `cancelled: true`.
+
+---
 
 ## Implementation Steps
 
-### Step 1: Defer `discoverDashboard` Import in `bridge.ts`
-- Edit `packages/extension/src/bridge.ts`:
-  - Delete static import: `import { discoverDashboard } from "@blackbelt-technology/pi-dashboard-shared/mdns-discovery.js";`.
-  - In `session_start` handler (around line 2789), insert dynamic import:
+### Step 1: Create Pristine Originals Cache (`ctx-ui-originals.ts`)
+- Create `packages/extension/src/ctx-ui-originals.ts`.
+- Implement `PristineUiOriginals` interface holding pristine references for `notify`, `select`, `input`, `confirm`, `editor`.
+- Define `const pristineUiMap = new WeakMap<object, PristineUiOriginals>()`.
+- Export `getOrCreatePristineOriginals(ui: any)`:
+  - If `ui` is present in `pristineUiMap`, return the cached pristine originals object.
+  - Otherwise, capture `.bind(ui)` references for native methods, store in `pristineUiMap`, and return.
+
+### Step 2: Update `PromptBus` Error Support (`prompt-bus.ts`)
+- Add `error?: string` to `PromptResponse` in `packages/extension/src/prompt-bus.ts`.
+- Update `request()` method's adapter dispatch loop (lines ~163-172):
+  - In `catch (err)` block, log `console.error('[PromptBus] Adapter "${adapter.name}" threw during onRequest:', err)`.
+
+### Step 3: Wire Idempotent Capture & Non-Cancelling Error Handling (`bridge.ts`)
+- Import `getOrCreatePristineOriginals` in `packages/extension/src/bridge.ts`.
+- Replace inline `originals` creation in `session_start` (lines 2194-2200) with `getOrCreatePristineOriginals(ctx.ui)`.
+- Mark each generated wrapper function (lines 2399-2570) with `wrapperFn.__isPromptBusWrapper = true`.
+- In TUI adapter `onRequest` -> `present()` (lines 2342-2346):
+  - Change `catch` block to:
     ```ts
-    const { discoverDashboard } = await import(
-      "@blackbelt-technology/pi-dashboard-shared/mdns-discovery.js"
-    );
+    } catch (err) {
+      if (!ac.signal.aborted) {
+        bus.respond({
+          id: prompt.id,
+          cancelled: false,
+          error: err instanceof Error ? err.message : String(err),
+          source: "tui",
+        });
+      }
+    }
     ```
-  - Pass the dynamically resolved `discoverDashboard` to `autoStartServer(config, { discoverDashboard, ... })`.
 
-### Step 2: Create Import Timing Unit Test
-- Create `packages/extension/src/__tests__/bridge-import-timing.test.ts`:
-  - Mock external dependencies (`provider-register.js`, `role-manager.js`) if needed.
-  - Dynamically import `../bridge.js`.
-  - Assert that `bonjour-service` is absent from `require.cache` / module registries prior to `session_start`.
+### Step 4: Add Regression Test Suite (`ctx-ui-session-start-repatch-regression.test.ts`)
+- Create `packages/extension/src/__tests__/ctx-ui-session-start-repatch-regression.test.ts`.
+- Write test case (a): Assert `getOrCreatePristineOriginals(ctx.ui)` returns identical function references before and after patching `ctx.ui`.
+- Write test case (b): Simulate 10 consecutive `session_start` patch cycles on a single `ctx.ui` mock. Call `ctx.ui.select(...)` and assert it completes without stack overflow or wrapper chain recursion.
+- Write test case (c): Register an adapter that throws in `onRequest` / `present()`, trigger a request via `bus.request()`, and assert `response.cancelled === false` and `response.error` is defined.
 
-### Step 3: Create Measurement Script
-- Create `scripts/measure-module-eval.js`:
-  - Use `performance.now()` to record import duration for:
-    - `@blackbelt-technology/pi-dashboard-shared/mdns-discovery.js` (and `bonjour-service`)
-    - `yaml`
-    - `@blackbelt-technology/pi-dashboard-shared/config.js`
-    - `packages/extension/src/bridge.ts` (before and after deferral)
-  - Output structured JSON and human-readable timing table.
+### Step 5: Verify Suite & Fix Existing Tests
+- Run focused Vitest suite to ensure zero regressions across all extension tests.
 
-### Step 4: Run Measurements & Document Findings
-- Run `node scripts/measure-module-eval.js`.
-- Create `docs/research-113-findings.md` with:
-  - **Question 1 (Bridge vs 6 other extensions):** Recorded module evaluation share of bridge; note that multi-extension interactive PTY benchmarking is constrained in headless subagent environments.
-  - **Question 2 (Bonjour vs config/role/YAML/remaining imports):** Detailed breakdown of `bonjour-service` evaluation time vs `yaml` / config IO time.
-  - **Question 3 (Inspector / module trace capabilities):** Analysis of Node/Bun `--trace-warnings`, `--cpu-prof`, and V8 inspector availability through wrapper environments.
-
-### Step 5: Update AGENTS Documentation Index
-- Add entry to `docs/AGENTS.md` for `docs/research-113-findings.md`.
-
-### Step 6: Verify Test Suite
-- Run `npx vitest run packages/extension/src/__tests__/bridge-import-timing.test.ts`.
-- Run `npx vitest run packages/extension/src/__tests__/bridge-ask-registration.test.ts`.
-- Run `npx vitest run packages/extension/src/__tests__/server-auto-start.test.ts`.
-- Run `npx vitest run packages/shared/src/__tests__/mdns-discovery.test.ts`.
+---
 
 ## Test Plan
 
-- **Bridge Import Timing Test:** `npx vitest run packages/extension/src/__tests__/bridge-import-timing.test.ts` to confirm static import deferral.
-- **Ask Registration Timing Test:** `npx vitest run packages/extension/src/__tests__/bridge-ask-registration.test.ts` to ensure factory-time `ask`/`ask_user` tool registration remains unaffected.
-- **Server Auto-Start Test:** `npx vitest run packages/extension/src/__tests__/server-auto-start.test.ts` to ensure mDNS discovery and auto-start logic behavior remain unbroken.
-- **mDNS Discovery Test:** `npx vitest run packages/shared/src/__tests__/mdns-discovery.test.ts` to verify mDNS shared module functions.
-- **Measurement Script Verification:** `node scripts/measure-module-eval.js` to ensure timing script executes without errors.
+Execute test runner from worktree root using isolated environment:
+```bash
+PATH="/home/joe/code/zge-workspace/omp-dashboard/node_modules/.bin:$PATH" \
+HOME=$(mktemp -d -t pi-test-XXXXXX) \
+vitest run \
+  packages/extension/src/__tests__/ctx-ui-session-start-repatch-regression.test.ts \
+  packages/extension/src/__tests__/prompt-bus.test.ts \
+  packages/extension/src/__tests__/tui-prompt-adapter.test.ts \
+  packages/extension/src/__tests__/no-tui-multiselect-arm-regression.test.ts \
+  packages/extension/src/__tests__/prompt-bus-wiring.test.ts
+```
+
+Expected output:
+- All test suites pass.
+- `ctx-ui-session-start-repatch-regression.test.ts` passes all 3 sub-assertions.
+- `no-tui-multiselect-arm-regression.test.ts` continues to pass.
+
+---
 
 ## Acceptance Criteria
 
-1. `packages/extension/src/bridge.ts` no longer statically imports `discoverDashboard`.
-2. `discoverDashboard` is dynamically imported inside `session_start` prior to calling `autoStartServer`.
-3. `packages/extension/src/__tests__/bridge-import-timing.test.ts` passes and asserts deferral.
-4. Existing bridge registration and auto-start vitests pass.
-5. `scripts/measure-module-eval.js` and `docs/research-113-findings.md` exist and provide empirical timing evidence answering #113's 3 open questions.
-6. `docs/AGENTS.md` is updated with `docs/research-113-findings.md`.
+- [x] Re-patching `session_start` does not nest wrappers or grow call stack depth across multiple sessions.
+- [x] Pristine originals are captured once per `ctx.ui` object identity via `WeakMap`.
+- [x] Adapter exceptions log error details and respond with `cancelled: false` and `error` string rather than user `Cancelled`.
+- [x] Regression test covers pristine function identity, multi-session non-recursion, and non-cancelled error reporting.
