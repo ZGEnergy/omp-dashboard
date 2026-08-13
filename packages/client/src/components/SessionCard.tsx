@@ -72,7 +72,7 @@ export function ActivityIndicator({ session }: { session: DashboardSession }) {
 
   if (session.status === "ended") return null;
 
-  if (isInputNeededTool(session.currentTool) && !hasWidgetBarPrompt) {
+  if (isInputNeededTool(session.currentTool, session.currentToolArgs) && !hasWidgetBarPrompt) {
     // Blocked-on-you: distinct "Needs you" label + needs-you color + icon.
     // See change: improve-dashboard-attention-routing.
     return <span className="text-[var(--status-needs-you)] truncate inline-flex items-center gap-0.5"><Icon path={mdiCommentQuestion} size={0.5} /> {i18nT("common.needsYou", undefined, "Needs you")}</span>;

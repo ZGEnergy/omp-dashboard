@@ -76,7 +76,7 @@ export function CollapsedToolGroup({ group, toolContext }: Props) {
                   context={toolContext}
                   startedAt={row.startedAt}
                   duration={row.duration}
-                  showResultBody={prefs.toolResults || isInputNeededTool(row.toolName)}
+                  showResultBody={prefs.toolResults || isInputNeededTool(row.toolName, row.args)}
                 />
               );
             }

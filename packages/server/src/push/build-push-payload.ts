@@ -8,8 +8,9 @@
  * (design Decision 5). No I/O — trivially unit-testable.
  * See change: add-server-push-notifications.
  */
-import type { DashboardEvent, DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+
 import { isInputNeededTool } from "@blackbelt-technology/pi-dashboard-shared/input-needed-tools.js";
+import type { DashboardEvent, DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import type { PushPayload } from "./push-transports/types.js";
 
 const MAX_ERROR_LEN = 160;
@@ -43,8 +44,8 @@ export function buildPushPayload(session: DashboardSession, event: DashboardEven
     };
   }
 
-  // Trigger 2: waiting for user input (dashboard ask_user or core OMP `ask`).
-  if (isInputNeededTool(session.currentTool)) {
+  // Trigger 2: waiting for user input (dashboard ask_user, core OMP `ask`, or write xd://propose).
+  if (isInputNeededTool(session.currentTool, session.currentToolArgs)) {
     return {
       type: "session_attention",
       sessionId: session.id,

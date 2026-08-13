@@ -13,8 +13,8 @@
  * See change: add-session-status-to-folder-proposal-rows
  */
 
-import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { isInputNeededTool } from "@blackbelt-technology/pi-dashboard-shared/input-needed-tools.js";
+import type { DashboardSession } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import {
   mdiApplicationOutline,
   mdiCircle,
@@ -49,7 +49,7 @@ export function isChatRoutedAskUser(
   // Ended sessions never "need you" even if currentTool lingers as ask*.
   return (
     session.status !== "ended" &&
-    isInputNeededTool(session.currentTool) &&
+    isInputNeededTool(session.currentTool, session.currentToolArgs) &&
     !hasWidgetBarPrompt
   );
 }

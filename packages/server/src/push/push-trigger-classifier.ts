@@ -5,8 +5,9 @@
  * notification buckets. It deliberately has no transport or persistence
  * behavior; event-wiring owns the viewed/replay gate and fanout attempt.
  */
-import type { DashboardEvent, SessionStatus } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+
 import { isInputNeededTool } from "@blackbelt-technology/pi-dashboard-shared/input-needed-tools.js";
+import type { DashboardEvent, SessionStatus } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 import { isUnreadTrigger } from "../event-status-extraction.js";
 
 export type PushTriggerBucket = "actions-required" | "claude-decides";
@@ -19,6 +20,7 @@ export interface PushTriggerClassification {
 export interface PushTriggerSnapshot {
   status?: SessionStatus;
   currentTool?: string | null;
+  currentToolArgs?: Record<string, unknown> | null;
 }
 
 export interface PushTriggerPreferences {
@@ -45,8 +47,11 @@ export function classifyPushTrigger(
     return { kind: "crash", bucket: "actions-required" };
   }
 
-  // Input-needed transitions include dashboard ask_user and pi core ask.
-  if (isInputNeededTool(after.currentTool) && !isInputNeededTool(before.currentTool)) {
+  // Input-needed transitions include dashboard ask_user, pi core ask, and write xd://propose.
+  if (
+    isInputNeededTool(after.currentTool, after.currentToolArgs) &&
+    !isInputNeededTool(before.currentTool, before.currentToolArgs)
+  ) {
     return { kind: "input-needed", bucket: "actions-required" };
   }
 

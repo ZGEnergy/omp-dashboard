@@ -100,6 +100,7 @@ export interface DashboardSession {
   cacheWrite?: number;
   cost?: number;
   currentTool?: string | null;
+  currentToolArgs?: Record<string, unknown> | null;
   gitBranch?: string;
   gitBranchUrl?: string;
   gitPrNumber?: number;

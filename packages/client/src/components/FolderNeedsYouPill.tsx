@@ -45,7 +45,7 @@ export function FolderNeedsYouPill({
   onActivate: (sessionId: string) => void;
 }) {
   const candidates = sessions.filter(
-    (s) => isInputNeededTool(s.currentTool) && s.status !== "ended",
+    (s) => isInputNeededTool(s.currentTool, s.currentToolArgs) && s.status !== "ended",
   );
   // Per-candidate widget-bar classification once its probe reports. Absent =
   // not yet classified (excluded from the count until known) so the pill never
