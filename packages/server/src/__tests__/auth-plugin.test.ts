@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { validateWsUpgrade, escapeHtml, isBypassed } from "../auth-plugin.js";
+import { describe, expect, it } from "vitest";
+import { COOKIE_NAME, signToken } from "../auth.js";
+import { escapeHtml, isBypassed, renderDeniedPage, renderLoginPage, validateWsUpgrade } from "../auth-plugin.js";
 import { isBypassedHost } from "../localhost-guard.js";
-import { signToken, COOKIE_NAME } from "../auth.js";
 
 const SECRET = "test-secret-for-ws-auth-testing";
 
@@ -113,5 +113,16 @@ describe("escapeHtml", () => {
   it("should pass through safe strings unchanged", () => {
     expect(escapeHtml("user@example.com")).toBe("user@example.com");
     expect(escapeHtml("hello world")).toBe("hello world");
+  });
+});
+describe("renderLoginPage & renderDeniedPage", () => {
+  it("should include viewport-fit=cover in viewport meta tag of renderLoginPage", () => {
+    const html = renderLoginPage([{ key: "google", name: "Google" }]);
+    expect(html).toContain('content="width=device-width,initial-scale=1,viewport-fit=cover"');
+  });
+
+  it("should include viewport-fit=cover in viewport meta tag of renderDeniedPage", () => {
+    const html = renderDeniedPage("user@example.com");
+    expect(html).toContain('content="width=device-width,initial-scale=1,viewport-fit=cover"');
   });
 });
