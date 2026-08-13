@@ -49,11 +49,9 @@ export type CanvasDeclareResult =
   | { ok: true; chip: ServerChip }
   | { ok: false; error: string };
 
-/** True when a path is absolute or contains a `..` traversal segment. */
-function isUnsafePath(p: string): boolean {
+/** True when a path is empty or contains a `..` traversal segment. */
+function hasPathTraversal(p: string): boolean {
   if (p.length === 0) return true;
-  if (p.startsWith("/") || p.startsWith("\\")) return true; // POSIX / UNC absolute
-  if (/^[A-Za-z]:[\\/]/.test(p)) return true; // Windows drive absolute
   return p.split(/[\\/]/).some((seg) => seg === "..");
 }
 
@@ -63,7 +61,7 @@ function isValidPort(n: unknown): n is number {
 
 /**
  * Cwd-free validation for the bridge tool's ack. Returns an error string when
- * the shape is malformed or the path is a traversal/absolute path; otherwise
+ * the shape is malformed or the path contains `..` traversal; otherwise
  * `null` (the server will finish normalization with the real cwd).
  */
 export function validateCanvasDeclareShape(
@@ -74,8 +72,8 @@ export function validateCanvasDeclareShape(
   if (target.kind === "file") {
     if (typeof target.path !== "string" || target.path.length === 0)
       return "canvas: file target needs a path";
-    if (isUnsafePath(target.path))
-      return "canvas: path must be relative to the session cwd (no absolute or `..`)";
+    if (hasPathTraversal(target.path))
+      return "canvas: path cannot contain `..` traversal";
     return null;
   }
   if (target.kind === "url") {

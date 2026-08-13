@@ -183,10 +183,10 @@ async function gateFilePath(
     return { code: 403, error: "unknown session path" };
   }
   const resolved = path.resolve(cwd, relPath);
-  if (!(await isAllowed(resolved, { anchors: [cwd] }))) {
+  const provenancePaths = sessionManager.getProvenancePathsForCwd(cwd);
+  if (!(await isAllowed(resolved, { anchors: [cwd], provenancePaths }))) {
     return { code: 403, error: "path outside working directory" };
   }
-  return { resolved };
 }
 
 export function registerFileRoutes(
@@ -227,7 +227,8 @@ export function registerFileRoutes(
       return { code: 403, error: "unknown session path" };
     }
     const resolved = path.resolve(cwd, relPath);
-    if (!(await isAllowed(resolved, { anchors: [cwd] }))) {
+    const provenancePaths = sessionManager.getProvenancePathsForCwd(cwd);
+    if (!(await isAllowed(resolved, { anchors: [cwd], provenancePaths }))) {
       return { code: 403, error: "path outside working directory" };
     }
     let stat: import("node:fs").Stats;
@@ -326,9 +327,10 @@ export function registerFileRoutes(
       }
 
       const resolved = path.resolve(cwd, relPath);
+      const provenancePaths = sessionManager.getProvenancePathsForCwd(cwd);
       // Anchors include the fixed `~/.pi` allowlist so a resolved `~/.pi/…`
       // mention (from `/api/file/resolve-mention`) previews without a 403 (D7).
-      if (!(await isAllowed(resolved, { anchors: [cwd, homePiAnchor()] }))) {
+      if (!(await isAllowed(resolved, { anchors: [cwd, homePiAnchor()], provenancePaths }))) {
         reply.code(403);
         return { success: false, error: "path outside working directory" } satisfies ApiResponse;
       }
@@ -403,7 +405,8 @@ export function registerFileRoutes(
       }
 
       const resolved = path.resolve(cwd, relPath);
-      if (!(await isAllowed(resolved, { anchors: [cwd] }))) {
+      const provenancePaths = sessionManager.getProvenancePathsForCwd(cwd);
+      if (!(await isAllowed(resolved, { anchors: [cwd], provenancePaths }))) {
         reply.code(403);
         return { success: false, error: "path outside working directory" } satisfies ApiResponse;
       }
@@ -574,7 +577,8 @@ export function registerFileRoutes(
       }
       const resolved = path.resolve(probePath);
       const anchors = [cwd, ...preferencesStore.getPinnedDirectories()];
-      if (!(await isAllowed(resolved, { anchors }))) {
+      const provenancePaths = sessionManager.getProvenancePathsForCwd(cwd);
+      if (!(await isAllowed(resolved, { anchors, provenancePaths }))) {
         reply.code(403);
         return { success: false, error: "path outside cwd" } satisfies ApiResponse;
       }
@@ -612,7 +616,8 @@ export function registerFileRoutes(
         reply.code(403);
         return { success: false, error: "unknown session path" } satisfies ApiResponse;
       }
-      const result = await resolveFileMention(mention, { cwd });
+      const provenancePaths = sessionManager.getProvenancePathsForCwd(cwd);
+      const result = await resolveFileMention(mention, { cwd, provenancePaths });
       return {
         success: true,
         data: result ? { resolved: result.resolved, kind: result.kind } : { resolved: null },
@@ -654,12 +659,13 @@ export function registerFileRoutes(
       }
 
       const resolved = path.resolve(cwd, relPath);
+      const provenancePaths = sessionManager.getProvenancePathsForCwd(cwd);
       // Layers ①/② (cwd + git common root) serve any type. Layer ③ — artifact
       // roots — is image-only and real-path contained; it covers agent
       // screenshots that live outside every cwd and git root.
       // See change: serve-agent-artifact-previews.
       if (
-        !(await isAllowed(resolved, { anchors: [cwd, homePiAnchor()] })) &&
+        !(await isAllowed(resolved, { anchors: [cwd, homePiAnchor()], provenancePaths })) &&
         !(await isImageUnderArtifactRoot(resolved))
       ) {
         reply.code(403);
@@ -814,7 +820,8 @@ export function registerFileRoutes(
       }
 
       const resolved = path.resolve(cwd, relPath);
-      if (!(await isAllowed(resolved, { anchors: [cwd, homePiAnchor()] }))) {
+      const provenancePaths = sessionManager.getProvenancePathsForCwd(cwd);
+      if (!(await isAllowed(resolved, { anchors: [cwd, homePiAnchor()], provenancePaths }))) {
         reply.code(403);
         return { success: false, error: "path outside working directory" } satisfies ApiResponse;
       }

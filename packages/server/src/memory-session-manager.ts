@@ -69,6 +69,8 @@ export interface SessionManager {
   get(sessionId: string): DashboardSession | undefined;
   listActive(): DashboardSession[];
   listAll(): DashboardSession[];
+  addProvenancePath(sessionId: string, absPath: string): void;
+  getProvenancePathsForCwd(cwd: string): Set<string>;
   /** Called after any mutation (register, unregister, update). Receives the affected session ID and optional context. */
   onChange?: (sessionId: string, ctx?: OnChangeContext) => void;
   /** Called after a session is unregistered (status set to ended). */
@@ -100,10 +102,12 @@ export function createMemorySessionManager(): SessionManager {
           // Preserve context usage until bridge sends fresh data
           contextTokens: existing.contextTokens,
           contextWindow: existing.contextWindow,
+          provenancePaths: existing?.provenancePaths ?? new Set<string>(),
         } : {
           tokensIn: 0,
           tokensOut: 0,
           cost: 0,
+          provenancePaths: new Set<string>(),
         }),
         // Apply registration params (always override)
         id: params.id,
@@ -147,6 +151,9 @@ export function createMemorySessionManager(): SessionManager {
     },
 
     restore(session: DashboardSession): void {
+      if (session.provenancePaths && !(session.provenancePaths instanceof Set)) {
+        session.provenancePaths = new Set(session.provenancePaths);
+      }
       sessions.set(session.id, session);
     },
 
@@ -178,6 +185,27 @@ export function createMemorySessionManager(): SessionManager {
 
     listAll(): DashboardSession[] {
       return Array.from(sessions.values());
+    },
+    addProvenancePath(sessionId: string, absPath: string): void {
+      const session = sessions.get(sessionId);
+      if (session) {
+        if (!session.provenancePaths) {
+          session.provenancePaths = new Set<string>();
+        }
+        session.provenancePaths.add(absPath);
+      }
+    },
+
+    getProvenancePathsForCwd(cwd: string): Set<string> {
+      const result = new Set<string>();
+      for (const session of sessions.values()) {
+        if (session.cwd === cwd && session.provenancePaths) {
+          for (const p of session.provenancePaths) {
+            result.add(p);
+          }
+        }
+      }
+      return result;
     },
   };
 

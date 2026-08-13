@@ -92,6 +92,14 @@ describe("isAllowed", () => {
     const target = path.join(link, "secret.txt");
     expect(await isAllowed(target, { anchors: [worktree] })).toBe(false);
   });
+  it("allows out-of-cwd file matching provenancePaths", async () => {
+    const provPath = path.join(plain, "deliverable.txt");
+    await fsp.writeFile(provPath, "content");
+    const provenancePaths = new Set([provPath]);
+
+    expect(await isAllowed(provPath, { anchors: [worktree], provenancePaths })).toBe(true);
+    expect(await isAllowed("/etc/passwd", { anchors: [worktree], provenancePaths })).toBe(false);
+  });
 });
 
 describe("gitRoot", () => {

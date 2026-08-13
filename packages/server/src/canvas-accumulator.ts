@@ -20,6 +20,7 @@
  * See change: auto-canvas.
  */
 
+import path from "node:path";
 import {
   type CanvasDeclareInput,
   type CanvasMode,
@@ -61,6 +62,8 @@ export interface CanvasAccumulatorDeps {
    * non-actionable. `port` echoes the expired chip.
    */
   broadcastServerChipExpire: (sessionId: string, port: number) => void;
+  /** Record session provenance path for out-of-cwd file access containment. */
+  recordProvenancePath?: (sessionId: string, absPath: string) => void;
 }
 
 export interface CanvasAccumulator {
@@ -115,16 +118,39 @@ export function createCanvasAccumulator(
     }
   }
 
+  function recordProvenance(sessionId: string, rawPath: string, cwd: string): void {
+    if (!rawPath) return;
+    if (rawPath.split(/[\\/]/).some((seg) => seg === "..")) return;
+    const absPath = path.resolve(cwd, rawPath);
+    deps.recordProvenancePath?.(sessionId, absPath);
+  }
+
   function onToolStart(sessionId: string, event: CanvasForwardedEvent, cwd: string): void {
     const toolName = typeof event.data?.toolName === "string" ? event.data.toolName : "";
     if (!toolName) return;
     const args = event.data?.args as Record<string, unknown> | undefined;
 
+    const toolLower = toolName.toLowerCase();
+
+    // Record session provenance paths for write, edit, ast_edit, and canvas
+    if (toolLower === "canvas") {
+      if (args?.target && typeof args.target === "object") {
+        const target = args.target as { kind?: unknown; path?: unknown };
+        if (target.kind === "file" && typeof target.path === "string") {
+          recordProvenance(sessionId, target.path, cwd);
+        }
+      }
+    } else if (toolLower === "write" || toolLower === "edit" || toolLower === "ast_edit") {
+      if (typeof args?.path === "string") {
+        recordProvenance(sessionId, args.path, cwd);
+      }
+    }
+
     // `canvas()` declare-tool: normalized here with the session cwd; bypasses
     // the type registry (Decision 5/6). Server target → chip path (Decision 4);
     // NO probe/fetch (S29). A bad shape is ignored (the bridge already returned
     // the error ack).
-    if (toolName.toLowerCase() === "canvas") {
+    if (toolLower === "canvas") {
       // `normalizeCanvasDeclare` re-validates the raw shape (cwd-free) before
       // trusting any field, so an untyped args object is safe to pass.
       const result = normalizeCanvasDeclare(args as CanvasDeclareInput | undefined, cwd);

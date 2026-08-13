@@ -99,14 +99,31 @@ export async function gitRoot(cwd: string): Promise<string> {
 }
 
 /**
- * Allow `resolved` if it is contained by ANY anchor's cwd-subtree (layer ①) or
- * that anchor's git-common-root subtree (layer ②). All anchors are checked
- * against layer ① first so the git spawn only fires when every fast path misses.
+ * Allow `resolved` if it matches a session provenance path, or if it is contained
+ * by ANY anchor's cwd-subtree (layer ①) or that anchor's git-common-root subtree (layer ②).
  */
 export async function isAllowed(
   resolved: string,
-  { anchors }: { anchors: string[] },
+  {
+    anchors,
+    provenancePaths,
+  }: {
+    anchors: string[];
+    provenancePaths?: Set<string> | Iterable<string>;
+  },
 ): Promise<boolean> {
+  // Layer 0 — session provenance paths (out-of-cwd files created/declared by session).
+  if (provenancePaths) {
+    let realResolved: string | undefined;
+    for (const prov of provenancePaths) {
+      if (within(resolved, prov)) return true;
+      if (!realResolved) {
+        realResolved = await safeRealpath(resolved);
+      }
+      const realProv = await safeRealpath(prov);
+      if (within(realResolved, realProv)) return true;
+    }
+  }
   // Layer ① — logical, no spawn. Catches ~every real read.
   for (const anchor of anchors) {
     if (within(resolved, anchor)) return true;

@@ -184,4 +184,28 @@ describe("canvas accumulator", () => {
     const settle = h.intents.filter((i) => i.phase === "settle");
     expect(settle[0].target).toEqual({ kind: "file", cwd: CWD, path: "report.md" });
   });
+  it("records session provenance paths for write, edit, ast_edit, and canvas tools", () => {
+    const recorded: Array<{ sessionId: string; path: string }> = [];
+    const acc = createCanvasAccumulator({
+      readCanvasTypes: () => DEFAULT_CANVAS_TYPES,
+      broadcastIntent: () => {},
+      broadcastServerChip: () => {},
+      broadcastServerChipExpire: () => {},
+      recordProvenancePath: (sessionId, path) => recorded.push({ sessionId, path }),
+    });
+
+    acc.onEvent("s1", writeEvent("/out/file1.txt"), live);
+    acc.onEvent("s1", { eventType: "tool_execution_start", data: { toolName: "edit", args: { path: "/out/file2.txt" } } }, live);
+    acc.onEvent("s1", { eventType: "tool_execution_start", data: { toolName: "ast_edit", args: { path: "sub/file3.txt" } } }, live);
+    acc.onEvent("s1", canvasEvent({ target: { kind: "file", path: "/out/file4.txt" } }), live);
+    // Traversal attempt should be rejected from provenance recording
+    acc.onEvent("s1", writeEvent("../etc/passwd"), live);
+
+    expect(recorded).toEqual([
+      { sessionId: "s1", path: "/out/file1.txt" },
+      { sessionId: "s1", path: "/out/file2.txt" },
+      { sessionId: "s1", path: `${CWD}/sub/file3.txt` },
+      { sessionId: "s1", path: "/out/file4.txt" },
+    ]);
+  });
 });
