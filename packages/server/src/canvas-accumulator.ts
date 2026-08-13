@@ -38,7 +38,7 @@ import type { ViewTarget } from "@blackbelt-technology/pi-dashboard-shared/types
 /** Minimal forwarded-event shape the accumulator reads. */
 export interface CanvasForwardedEvent {
   eventType: string;
-  data?: { toolName?: unknown; args?: unknown };
+  data?: { toolName?: unknown; args?: unknown; isError?: boolean };
 }
 
 export interface CanvasAccumulatorDeps {

@@ -770,7 +770,7 @@ export function registerFileRoutes(
   // engine-only PDF render (`{mode:"pdf"}`; no in-process fallback — engine
   // absent → {success:false}; change: render-pptx-preview). Non-supported
   // extensions → 400. Same anti-traversal gate as `/api/file/raw`.
-  fastify.get<{ Querystring: { cwd?: string; path?: string } }>(
+  fastify.get<{ Querystring: { cwd?: string; path?: string; sessionId?: string } }>(
     "/api/file/render",
     { preHandler: networkGuard },
     async (request, reply) => {
