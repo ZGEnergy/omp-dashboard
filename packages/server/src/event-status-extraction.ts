@@ -3,7 +3,7 @@
  * Returns partial DashboardSession updates, or null if the event is not relevant.
  */
 
-import { isInputNeededTool } from "@blackbelt-technology/pi-dashboard-shared/input-needed-tools.js";
+import { isInputNeededTool, isProposeWrite } from "@blackbelt-technology/pi-dashboard-shared/input-needed-tools.js";
 import type { DashboardEvent, DashboardSession, SessionStatus } from "@blackbelt-technology/pi-dashboard-shared/types.js";
 
 // Use null (not undefined) for fields that must be cleared — undefined is
@@ -63,10 +63,30 @@ export function extractSessionUpdates(event: DashboardEvent): SessionUpdates | n
     case "agent_end":
       return { status: "idle", currentTool: null, currentToolArgs: null };
 
+    case "tool_call": {
+      const toolName =
+        (event.data?.toolName as string | undefined) ??
+        (event.data?.name as string | undefined) ??
+        null;
+      const toolArgs =
+        (event.data?.input as Record<string, unknown> | undefined) ??
+        (event.data?.args as Record<string, unknown> | undefined) ??
+        (event.data?.params as Record<string, unknown> | undefined) ??
+        null;
+      if (isProposeWrite(toolName, toolArgs)) {
+        return {
+          currentTool: toolName,
+          currentToolArgs: toolArgs,
+        };
+      }
+      return null;
+    }
+
     case "tool_execution_start": {
       const toolArgs =
         (event.data?.args as Record<string, unknown> | undefined) ??
         (event.data?.params as Record<string, unknown> | undefined) ??
+        (event.data?.input as Record<string, unknown> | undefined) ??
         null;
       return {
         currentTool: (event.data?.toolName as string) ?? null,
@@ -75,6 +95,7 @@ export function extractSessionUpdates(event: DashboardEvent): SessionUpdates | n
     }
 
     case "tool_execution_end":
+    case "tool_result":
       return { currentTool: null, currentToolArgs: null };
 
     // Flow / architect events are NOT extracted here. Per change

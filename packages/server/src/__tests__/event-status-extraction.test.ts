@@ -31,6 +31,28 @@ describe("extractSessionUpdates", () => {
     const updates = extractSessionUpdates(makeEvent("tool_execution_end", { toolName: "write" }));
     expect(updates).toEqual({ currentTool: null, currentToolArgs: null });
   });
+  it("should return currentTool and currentToolArgs on tool_call for write xd://propose", () => {
+    const updates = extractSessionUpdates(
+      makeEvent("tool_call", { toolName: "write", input: { path: "xd://propose" } }),
+    );
+    expect(updates).toEqual({
+      currentTool: "write",
+      currentToolArgs: { path: "xd://propose" },
+    });
+  });
+
+  it("should return null on tool_call for ordinary write", () => {
+    const updates = extractSessionUpdates(
+      makeEvent("tool_call", { toolName: "write", input: { path: "src/foo.ts" } }),
+    );
+    expect(updates).toBeNull();
+  });
+
+  it("should clear currentTool and currentToolArgs on tool_result", () => {
+    const updates = extractSessionUpdates(makeEvent("tool_result", { toolName: "write" }));
+    expect(updates).toEqual({ currentTool: null, currentToolArgs: null });
+  });
+
 
   it("does not derive model state from model_select events", () => {
     const updates = extractSessionUpdates(
