@@ -1,11 +1,96 @@
-import fs from "node:fs";
-import pathModule from "node:path";
 import { isProposeWrite } from "@blackbelt-technology/pi-dashboard-shared/input-needed-tools.js";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 import type { PromptBus } from "./prompt-bus.js";
 
 export interface RegisterProposeToolOptions {
   onPlanApproved?: (info: { toolCallId: string; planPath: string }) => void;
+}
+
+export interface AgentToolResult {
+  content: Array<{ type: "text"; text: string }>;
+  details?: Record<string, unknown>;
+}
+
+export const ProposeParametersSchema = Type.Object(
+  {
+    path: Type.Optional(
+      Type.String({
+        description: "Target path (e.g. xd://propose or file path)",
+      }),
+    ),
+    title: Type.Optional(
+      Type.String({
+        description: "Title of the plan proposal",
+      }),
+    ),
+    content: Type.Optional(
+      Type.String({
+        description: "Markdown content of the plan proposal",
+      }),
+    ),
+    planPath: Type.Optional(
+      Type.String({
+        description: "Path to the plan file (e.g. plan.md or local://docs/plan.md)",
+      }),
+    ),
+    xdev: Type.Optional(
+      Type.Object(
+        {
+          tool: Type.Optional(Type.String()),
+        },
+        { description: "xdev tool identifier" },
+      ),
+    ),
+  },
+  { description: "Parameters for plan approval proposals" },
+);
+
+export const WriteParametersSchema = Type.Object(
+  {
+    path: Type.String({ description: "File path to write, or xd://propose for plan approval" }),
+    content: Type.String({ description: "Content to write" }),
+  },
+  { description: "Write parameters" },
+);
+type ToolDef = {
+  name: string;
+  label?: string;
+  description?: string;
+  parameters?: unknown;
+  execute: (
+    toolCallId: unknown,
+    params: unknown,
+    signal: unknown,
+    onUpdate: unknown,
+    ctx: unknown,
+  ) => Promise<unknown>;
+};
+
+function getExistingWriteTool(pi: ExtensionAPI): ToolDef | undefined {
+  const ext = pi as unknown as {
+    getAllTools?: () => ToolDef[];
+    getActiveTools?: () => ToolDef[];
+    tools?: Map<string, ToolDef>;
+  };
+  if (typeof ext.getAllTools === "function") {
+    const tools = ext.getAllTools();
+    if (Array.isArray(tools)) {
+      const found = tools.find((t) => t?.name === "write");
+      if (found) return found;
+    }
+  }
+  if (typeof ext.getActiveTools === "function") {
+    const tools = ext.getActiveTools();
+    if (Array.isArray(tools)) {
+      const found = tools.find((t) => t?.name === "write");
+      if (found) return found;
+    }
+  }
+  if (ext.tools instanceof Map) {
+    return ext.tools.get("write");
+  }
+  return undefined;
 }
 
 /**
@@ -26,7 +111,7 @@ export function registerProposeTool(
     toolCallId: unknown,
     params: Record<string, unknown>,
     signal: unknown,
-  ): Promise<string> => {
+  ): Promise<AgentToolResult> => {
     const promptBus = getPromptBus();
     const pathStr = typeof params.path === "string" ? params.path : undefined;
 
@@ -69,7 +154,11 @@ export function registerProposeTool(
     );
 
     if (res.cancelled || res.answer === "Reject") {
-      return "Plan approval rejected by user. Remaining in plan mode.";
+      const text = "Plan approval rejected by user. Remaining in plan mode.";
+      return {
+        content: [{ type: "text", text }],
+        details: { approved: false, status: "rejected" },
+      };
     }
 
     if (res.answer === "Refine plan") {
@@ -84,7 +173,11 @@ export function registerProposeTool(
         signal as AbortSignal | undefined,
       );
       const feedback = inputRes.answer || "User requested plan refinement.";
-      return `Plan refinement requested by user: ${feedback}. Remaining in plan mode.`;
+      const text = `Plan refinement requested by user: ${feedback}. Remaining in plan mode.`;
+      return {
+        content: [{ type: "text", text }],
+        details: { approved: false, status: "refine", feedback },
+      };
     }
 
     if (res.answer === "Approve and execute") {
@@ -92,38 +185,18 @@ export function registerProposeTool(
       if (pi.events && typeof pi.events.emit === "function") {
         pi.events.emit("plan:approved", { toolCallId: id, planPath });
       }
-      return "Plan approved by user. Proceeding to execution.";
+      const text = "Plan approved by user. Proceeding to execution.";
+      return {
+        content: [{ type: "text", text }],
+        details: { approved: true, status: "approved", planPath },
+      };
     }
 
-    return "Plan approval completed.";
-  };
-
-  const writeHandler = async (
-    toolCallId: unknown,
-    rawParams: unknown,
-    signal: unknown,
-    _onUpdate: unknown,
-    _ctx: unknown,
-  ): Promise<string> => {
-    const params = (rawParams as Record<string, unknown>) ?? {};
-
-    if (isProposeWrite("write", params)) {
-      return executePropose(toolCallId, params, signal);
-    }
-
-    // Default: ordinary file write
-    const targetPath = typeof params.path === "string" ? params.path : undefined;
-    const content = typeof params.content === "string" ? params.content : "";
-    if (targetPath) {
-      const dir = pathModule.dirname(targetPath);
-      if (dir && dir !== ".") {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-      fs.writeFileSync(targetPath, content, "utf-8");
-      return `Wrote ${content.length} bytes to ${targetPath}`;
-    }
-
-    return "Write executed.";
+    const text = "Plan approval completed.";
+    return {
+      content: [{ type: "text", text }],
+      details: { completed: true },
+    };
   };
 
   const proposeHandler = async (
@@ -132,22 +205,40 @@ export function registerProposeTool(
     signal: unknown,
     _onUpdate: unknown,
     _ctx: unknown,
-  ): Promise<string> => {
+  ): Promise<AgentToolResult> => {
     const params = (rawParams as Record<string, unknown>) ?? {};
     return executePropose(toolCallId, params, signal);
   };
 
-  pi.registerTool({
-    name: "write",
-    label: "Write",
-    description: "Write content to a file or submit plan approval via xd://propose",
-    execute: writeHandler,
-  });
+  const existingWrite = getExistingWriteTool(pi);
+  if (existingWrite) {
+    pi.registerTool({
+      ...existingWrite,
+      name: "write",
+      label: existingWrite.label ?? "Write",
+      description: existingWrite.description ?? "Write content to a file",
+      parameters: existingWrite.parameters ?? WriteParametersSchema,
+      async execute(
+        toolCallId: unknown,
+        rawParams: unknown,
+        signal: unknown,
+        onUpdate: unknown,
+        ctx: unknown,
+      ) {
+        const params = (rawParams as Record<string, unknown>) ?? {};
+        if (isProposeWrite("write", params)) {
+          return executePropose(toolCallId, params, signal);
+        }
+        return existingWrite.execute(toolCallId, rawParams, signal, onUpdate, ctx);
+      },
+    });
+  }
 
   pi.registerTool({
     name: "propose",
     label: "Propose Plan",
     description: "Submit plan proposal for user approval",
+    parameters: ProposeParametersSchema,
     execute: proposeHandler,
   });
 }

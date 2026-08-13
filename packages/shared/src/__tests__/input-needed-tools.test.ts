@@ -9,12 +9,12 @@ describe("isProposeWrite", () => {
 
   it("returns true for write with path xd://propose or xdev.tool propose", () => {
     expect(isProposeWrite("write", { path: "xd://propose" })).toBe(true);
-    expect(isProposeWrite("write", { path: "foo/xd://propose" })).toBe(true);
     expect(isProposeWrite("write", { xdev: { tool: "propose" } })).toBe(true);
   });
 
-  it("returns false for plain write with normal path or no args", () => {
+  it("returns false for plain write with normal path, non-exact xd://propose, or no args", () => {
     expect(isProposeWrite("write")).toBe(false);
+    expect(isProposeWrite("write", { path: "foo/xd://propose" })).toBe(false);
     expect(isProposeWrite("write", { path: "src/index.ts" })).toBe(false);
     expect(isProposeWrite("write", { path: "README.md" })).toBe(false);
   });

@@ -31,7 +31,7 @@ export function isProposeWrite(
     const path = typeof args.path === "string" ? args.path : undefined;
     const xdev = args.xdev as Record<string, unknown> | undefined;
     const xdevTool = typeof xdev?.tool === "string" ? xdev.tool : undefined;
-    if (path === "xd://propose" || path?.includes("xd://propose") || xdevTool === "propose") {
+    if (path === "xd://propose" || xdevTool === "propose") {
       return true;
     }
   }

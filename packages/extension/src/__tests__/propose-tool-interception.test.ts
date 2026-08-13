@@ -1,14 +1,29 @@
-import fs from "node:fs";
-import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { registerProposeTool } from "../propose-tool.js";
 
-function createMockPi() {
+function createMockPi(hasExistingWrite = true) {
   const tools = new Map<string, any>();
   const emittedEvents: Array<{ event: string; payload: any }> = [];
+  const existingWriteExecute = vi.fn().mockImplementation(async (_id: any, params: any) => {
+    return {
+      content: [{ type: "text", text: `Builtin write: ${params.content?.length ?? 0} bytes to ${params.path}` }],
+      details: { builtin: true, path: params.path },
+    };
+  });
+
+  if (hasExistingWrite) {
+    tools.set("write", {
+      name: "write",
+      label: "Builtin Write",
+      description: "Original write tool",
+      execute: existingWriteExecute,
+    });
+  }
+
   return {
     tools,
     emittedEvents,
+    existingWriteExecute,
     registerTool: (def: any) => {
       tools.set(def.name, def);
     },
@@ -21,15 +36,30 @@ function createMockPi() {
 }
 
 describe("registerProposeTool", () => {
-  it("registers write and propose tools", () => {
-    const pi = createMockPi();
+  it("registers propose tool and wraps existing write tool when present", () => {
+    const pi = createMockPi(true);
     registerProposeTool(pi as any, () => undefined);
     expect(pi.tools.has("write")).toBe(true);
     expect(pi.tools.has("propose")).toBe(true);
   });
 
-  it("intercepts write xd://propose and requests plan approval on PromptBus", async () => {
-    const pi = createMockPi();
+  it("registers only propose tool when no existing write tool is present", () => {
+    const pi = createMockPi(false);
+    registerProposeTool(pi as any, () => undefined);
+    expect(pi.tools.has("write")).toBe(false);
+    expect(pi.tools.has("propose")).toBe(true);
+  });
+
+  it("includes parameters schema on registered tools", () => {
+    const pi = createMockPi(false);
+    registerProposeTool(pi as any, () => undefined);
+    const proposeTool = pi.tools.get("propose");
+    expect(proposeTool.parameters).toBeDefined();
+    expect(proposeTool.parameters.type).toBe("object");
+  });
+
+  it("intercepts write xd://propose and returns AgentToolResult on PromptBus approval", async () => {
+    const pi = createMockPi(true);
     const mockRequest = vi.fn().mockResolvedValue({
       id: "p1",
       answer: "Approve and execute",
@@ -40,9 +70,9 @@ describe("registerProposeTool", () => {
     const onPlanApproved = vi.fn();
 
     registerProposeTool(pi as any, () => mockBus, { onPlanApproved });
-    const writeTool = pi.tools.get("write");
+    const proposeTool = pi.tools.get("propose");
 
-    const result = await writeTool.execute(
+    const result = await proposeTool.execute(
       "call-123",
       {
         path: "xd://propose",
@@ -55,7 +85,11 @@ describe("registerProposeTool", () => {
       {},
     );
 
-    expect(result).toBe("Plan approved by user. Proceeding to execution.");
+    expect(result).toEqual({
+      content: [{ type: "text", text: "Plan approved by user. Proceeding to execution." }],
+      details: { approved: true, status: "approved", planPath: "docs/plan.md" },
+    });
+
     expect(mockRequest).toHaveBeenCalledTimes(1);
     expect(mockRequest).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -81,8 +115,8 @@ describe("registerProposeTool", () => {
     });
   });
 
-  it("handles Refine plan answer by prompting for feedback", async () => {
-    const pi = createMockPi();
+  it("handles Refine plan answer with structured AgentToolResult", async () => {
+    const pi = createMockPi(true);
     const mockRequest = vi
       .fn()
       .mockResolvedValueOnce({
@@ -100,9 +134,9 @@ describe("registerProposeTool", () => {
     const mockBus: any = { request: mockRequest };
 
     registerProposeTool(pi as any, () => mockBus);
-    const writeTool = pi.tools.get("write");
+    const proposeTool = pi.tools.get("propose");
 
-    const result = await writeTool.execute(
+    const result = await proposeTool.execute(
       "call-456",
       {
         path: "xd://propose",
@@ -113,12 +147,19 @@ describe("registerProposeTool", () => {
       {},
     );
 
-    expect(result).toContain("Plan refinement requested by user: Needs more unit tests for auth edge cases.");
+    expect(result.content[0].text).toContain(
+      "Plan refinement requested by user: Needs more unit tests for auth edge cases.",
+    );
+    expect(result.details).toEqual({
+      approved: false,
+      status: "refine",
+      feedback: "Needs more unit tests for auth edge cases",
+    });
     expect(mockRequest).toHaveBeenCalledTimes(2);
   });
 
-  it("handles Reject answer by returning rejection notice", async () => {
-    const pi = createMockPi();
+  it("handles Reject answer with structured AgentToolResult", async () => {
+    const pi = createMockPi(true);
     const mockRequest = vi.fn().mockResolvedValue({
       id: "p1",
       answer: "Reject",
@@ -128,9 +169,9 @@ describe("registerProposeTool", () => {
     const mockBus: any = { request: mockRequest };
 
     registerProposeTool(pi as any, () => mockBus);
-    const writeTool = pi.tools.get("write");
+    const proposeTool = pi.tools.get("propose");
 
-    const result = await writeTool.execute(
+    const result = await proposeTool.execute(
       "call-789",
       {
         path: "xd://propose",
@@ -141,37 +182,36 @@ describe("registerProposeTool", () => {
       {},
     );
 
-    expect(result).toBe("Plan approval rejected by user. Remaining in plan mode.");
+    expect(result).toEqual({
+      content: [{ type: "text", text: "Plan approval rejected by user. Remaining in plan mode." }],
+      details: { approved: false, status: "rejected" },
+    });
   });
 
-  it("executes normal write for ordinary files without PromptBus request", async () => {
-    const pi = createMockPi();
+  it("delegates ordinary write calls to existing builtin write execution", async () => {
+    const pi = createMockPi(true);
     const mockRequest = vi.fn();
     const mockBus: any = { request: mockRequest };
 
     registerProposeTool(pi as any, () => mockBus);
     const writeTool = pi.tools.get("write");
 
-    const tmpDir = fs.mkdtempSync(path.join(process.cwd(), "tmp-test-write-"));
-    const filePath = path.join(tmpDir, "sub", "output.txt");
+    const result = await writeTool.execute(
+      "call-normal",
+      {
+        path: "src/output.txt",
+        content: "Hello world",
+      },
+      undefined,
+      undefined,
+      {},
+    );
 
-    try {
-      const result = await writeTool.execute(
-        "call-normal",
-        {
-          path: filePath,
-          content: "Hello world",
-        },
-        undefined,
-        undefined,
-        {},
-      );
-
-      expect(result).toContain("Wrote 11 bytes to");
-      expect(mockRequest).not.toHaveBeenCalled();
-      expect(fs.readFileSync(filePath, "utf-8")).toBe("Hello world");
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
+    expect(mockRequest).not.toHaveBeenCalled();
+    expect(pi.existingWriteExecute).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({
+      content: [{ type: "text", text: "Builtin write: 11 bytes to src/output.txt" }],
+      details: { builtin: true, path: "src/output.txt" },
+    });
   });
 });
