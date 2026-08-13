@@ -113,15 +113,16 @@ export async function isAllowed(
   },
 ): Promise<boolean> {
   // Layer 0 — session provenance paths (out-of-cwd files created/declared by session).
+  // Matches strictly by EXACT realpath equality (NOT `within()` subtree containment).
   if (provenancePaths) {
     let realResolved: string | undefined;
     for (const prov of provenancePaths) {
-      if (within(resolved, prov)) return true;
+      if (resolved === prov) return true;
       if (!realResolved) {
         realResolved = await safeRealpath(resolved);
       }
       const realProv = await safeRealpath(prov);
-      if (within(realResolved, realProv)) return true;
+      if (realResolved === realProv) return true;
     }
   }
   // Layer ① — logical, no spawn. Catches ~every real read.

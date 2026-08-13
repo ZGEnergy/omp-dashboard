@@ -78,12 +78,43 @@ describe("session-provenance out-of-cwd containment", () => {
     expect(resRaw.payload).toBe("out of cwd content");
   });
 
-  it("returns 403 for un-provenanced system path /etc/passwd", async () => {
+  it("returns 403 for system path /etc/passwd even if /etc or /etc/passwd was named without successful create", async () => {
+    // Attempting to add a directory like /etc MUST be ignored by addProvenancePath
+    sessionManager.addProvenancePath("sess-1", "/etc");
+
     const res = await app.inject({
       method: "GET",
       url: `/api/file?cwd=${encodeURIComponent(sessionCwd)}&path=/etc/passwd`,
     });
     expect(res.statusCode).toBe(403);
+  });
+
+  it("allows exact out-of-cwd file after successful write (e.g. /tmp/foo.md)", async () => {
+    const tmpFoo = path.join(os.tmpdir(), `foo-${Date.now()}.md`);
+    await fsp.writeFile(tmpFoo, "# Hello");
+
+    try {
+      // Add provenance after successful write
+      sessionManager.addProvenancePath("sess-1", tmpFoo);
+
+      const res = await app.inject({
+        method: "GET",
+        url: `/api/file?cwd=${encodeURIComponent(sessionCwd)}&path=${encodeURIComponent(tmpFoo)}`,
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().data.content).toBe("# Hello");
+
+      // Sibling or child path under tmpFoo is still 403
+      const resOther = await app.inject({
+        method: "GET",
+        url: `/api/file?cwd=${encodeURIComponent(sessionCwd)}&path=${encodeURIComponent(path.join(os.tmpdir(), "other.md"))}`,
+      });
+      expect(resOther.statusCode).toBe(403);
+    } finally {
+      if (await fsp.stat(tmpFoo).catch(() => null)) {
+        await fsp.unlink(tmpFoo);
+      }
+    }
   });
 
   it("strictly rejects path traversal attempts containing ..", async () => {

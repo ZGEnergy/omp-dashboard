@@ -92,13 +92,23 @@ describe("isAllowed", () => {
     const target = path.join(link, "secret.txt");
     expect(await isAllowed(target, { anchors: [worktree] })).toBe(false);
   });
-  it("allows out-of-cwd file matching provenancePaths", async () => {
+  it("allows exact out-of-cwd file matching provenancePaths (no subtree widening)", async () => {
     const provPath = path.join(plain, "deliverable.txt");
     await fsp.writeFile(provPath, "content");
     const provenancePaths = new Set([provPath]);
 
+    // Exact match allowed
     expect(await isAllowed(provPath, { anchors: [worktree], provenancePaths })).toBe(true);
-    expect(await isAllowed("/etc/passwd", { anchors: [worktree], provenancePaths })).toBe(false);
+
+    // Subpath or other files in the same directory MUST NOT be allowed
+    const siblingPath = path.join(plain, "other.txt");
+    const subPath = path.join(provPath, "child.txt");
+    expect(await isAllowed(siblingPath, { anchors: [worktree], provenancePaths })).toBe(false);
+    expect(await isAllowed(subPath, { anchors: [worktree], provenancePaths })).toBe(false);
+
+    // /etc/passwd MUST NOT be allowed, even if /etc is in provenancePaths
+    const dirProv = new Set(["/etc"]);
+    expect(await isAllowed("/etc/passwd", { anchors: [worktree], provenancePaths: dirProv })).toBe(false);
   });
 });
 
