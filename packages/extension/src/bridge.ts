@@ -10,7 +10,6 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureConfig, loadConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
-import { discoverDashboard } from "@blackbelt-technology/pi-dashboard-shared/mdns-discovery.js";
 import type { ServerToExtensionMessage } from "@blackbelt-technology/pi-dashboard-shared/protocol.js";
 import { isDashboardRunning } from "@blackbelt-technology/pi-dashboard-shared/server-identity.js";
 import type { FlowInfo, ImageContent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
@@ -2786,6 +2785,9 @@ function initBridge(pi: ExtensionAPI) {
       activeLoader = null;
       ctx.ui.setWidget("pi-dashboard-launch", undefined);
     };
+    const { discoverDashboard } = await import(
+      "@blackbelt-technology/pi-dashboard-shared/mdns-discovery.js"
+    );
     autoStartServer(config, {
       discoverDashboard,
       isDashboardRunning,
