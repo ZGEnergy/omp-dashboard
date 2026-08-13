@@ -105,6 +105,53 @@ describe("replay must not populate streamingThinking", () => {
     s = reduceEvent(s, start, { isLive: true });
     s = reduceEvent(s, delta, { isLive: true });
     expect(s.streamingThinking).toBe("pondering…");
+    expect(s.pendingThinking).toBe("pondering…");
     expect(s.thinkingStartedAt).toBe(1100);
+  });
+
+  it("replay then live deltas keep the full thought on thinking_end", () => {
+    const [start, , end] = thinkingEvents();
+    let s = createInitialState();
+    s = reduceEvent(s, start);
+    s = reduceEvent(s, {
+      eventType: "message_update",
+      timestamp: 1150,
+      data: { assistantMessageEvent: { type: "thinking_delta", delta: "replayed " } },
+    });
+    s = reduceEvent(s, {
+      eventType: "message_update",
+      timestamp: 1160,
+      data: { assistantMessageEvent: { type: "thinking_delta", delta: "live" } },
+    }, { isLive: true });
+    expect(s.streamingThinking).toBe("live");
+    expect(s.pendingThinking).toBe("replayed live");
+    s = reduceEvent(s, end, { isLive: true });
+    expect(s.streamingThinking).toBe("");
+    expect(s.pendingThinking).toBe("");
+    const thinking = s.messages.filter((m) => m.role === "thinking");
+    expect(thinking).toHaveLength(1);
+    expect(thinking[0].content).toBe("replayed live");
+    expect(thinking[0].streamedLive).toBe(true);
+  });
+
+  it("live then replay deltas keep the full thought on thinking_end", () => {
+    const [start, , end] = thinkingEvents();
+    let s = createInitialState();
+    s = reduceEvent(s, start, { isLive: true });
+    s = reduceEvent(s, {
+      eventType: "message_update",
+      timestamp: 1150,
+      data: { assistantMessageEvent: { type: "thinking_delta", delta: "live " } },
+    }, { isLive: true });
+    s = reduceEvent(s, {
+      eventType: "message_update",
+      timestamp: 1160,
+      data: { assistantMessageEvent: { type: "thinking_delta", delta: "replayed" } },
+    });
+    expect(s.streamingThinking).toBe("live ");
+    expect(s.pendingThinking).toBe("live replayed");
+    s = reduceEvent(s, end);
+    expect(s.messages.find((m) => m.role === "thinking")?.content).toBe("live replayed");
+    expect(s.messages.find((m) => m.role === "thinking")?.streamedLive).toBeFalsy();
   });
 });

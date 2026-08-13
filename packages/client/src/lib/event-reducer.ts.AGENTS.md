@@ -6,4 +6,4 @@ See change: fix-stale-answered-ask-replay — skip stale prompt_request when too
 
 See change: hot-window-metrics — exports `estimateDerivedDetailBytes(state)`: sum of `byteLengthOf(sub.entries)` over `state.subagents` (serialized bytes of derived subagent detail timelines, content-free byte count only). Feeds `HotWindowReport.detailBytes`.
 
-`pendingThinking` replay-only thinking accumulator. `thinking_delta` writes `streamingThinking` only when `isLive`. Replay fills `pendingThinking`; `thinking_end` commits from it. ChatView live ThinkingBlock reads `streamingThinking` — mid-thought cold batches must not flash.
+`pendingThinking` canonical in-progress thinking. Both replay and live append. `streamingThinking` is live-only chrome suffix. `thinking_end` commits `pendingThinking` so replay→live handoff keeps the prefix. ChatView live ThinkingBlock reads `streamingThinking` only.

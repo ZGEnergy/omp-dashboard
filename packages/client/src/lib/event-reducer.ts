@@ -220,6 +220,12 @@ export interface SessionState {
   streamingText: string;
   streamingThinking: string;
   /**
+   * Canonical in-progress thinking text. Replay and live both append here.
+   * ChatView live chrome reads `streamingThinking` only (live deltas).
+   * thinking_end commits this field so a replay→live handoff keeps the prefix.
+   */
+  pendingThinking: string;
+  /**
    * True when the user manually collapsed the LIVE streaming reasoning block.
    * Lifts the collapse intent across the streaming→committed block swap so the
    * committed message is created with `streamedLive:false` (no hold-open timer).
@@ -1592,12 +1598,12 @@ export function reduceEvent(
         }
         if (assistantEvent.type === "thinking_delta") {
           const delta = assistantEvent.delta ?? "";
+          next.pendingThinking = next.pendingThinking + delta;
           if (isLive) next.streamingThinking = next.streamingThinking + delta;
-          else next.pendingThinking = next.pendingThinking + delta;
           break;
         }
         if (assistantEvent.type === "thinking_end") {
-          const acc = isLive ? next.streamingThinking : next.pendingThinking;
+          const acc = next.pendingThinking;
           if (acc) {
             const startedAt = next.thinkingStartedAt;
             next.messages = [
