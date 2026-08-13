@@ -187,6 +187,7 @@ async function gateFilePath(
   if (!(await isAllowed(resolved, { anchors: [cwd], provenancePaths }))) {
     return { code: 403, error: "path outside working directory" };
   }
+  return { resolved };
 }
 
 export function registerFileRoutes(

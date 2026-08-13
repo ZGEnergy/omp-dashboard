@@ -8,7 +8,7 @@ import os from "node:os";
 import Fastify, { type FastifyInstance } from "fastify";
 import { createMemorySessionManager, type SessionManager } from "../memory-session-manager.js";
 import type { PreferencesStore } from "../preferences-store.js";
-import { registerFileRoutes } from "../routes/file-routes.ts";
+import { registerFileRoutes } from "../routes/file-routes.js";
 
 describe("session-provenance out-of-cwd containment", () => {
   let tmpDir: string;
