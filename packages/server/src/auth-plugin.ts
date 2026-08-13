@@ -76,7 +76,7 @@ function decodeState(state: string): { returnUrl: string } {
 /**
  * Simple login page HTML with provider links.
  */
-export function renderLoginPage(providers: ResolvedProvider[], error?: string): string {
+export function renderLoginPage(providers: Pick<ResolvedProvider, "key" | "name">[], error?: string): string {
   const providerLinks = providers
     .map((p) => `<a href="/auth/start/${p.key}" style="display:block;margin:10px 0;padding:12px 24px;background:#2563eb;color:#fff;text-decoration:none;border-radius:6px;text-align:center;font-size:16px;">Sign in with ${p.name}</a>`)
     .join("\n");
