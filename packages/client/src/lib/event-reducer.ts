@@ -727,6 +727,59 @@ const TURN_BOUNDARY_ROLES: ReadonlySet<ChatMessage["role"]> = new Set([
  * @param timestamp Event timestamp (used as the row's `timestamp`)
  * @param toolCallId Id of the upcoming tool — used as the row's stable id anchor
  */
+/**
+ * Flush the current `streamingThinking` into a permanent `thinking` ChatMessage
+ * row. Called when a tool/subagent is executed mid-thought or when a new thinking
+ * block begins before `thinking_end` fires.
+ */
+export function flushStreamingThinkingAsRow(
+  state: SessionState,
+  timestamp: number,
+  isLive: boolean,
+  seq?: number,
+  toolCallId?: string,
+): SessionState {
+  if (!state.streamingThinking) return state;
+
+  const startedAt = state.thinkingStartedAt;
+  const duration = startedAt ? timestamp - startedAt : undefined;
+  const id = toolCallId
+    ? seq !== undefined
+      ? `thinking-${seq}-flush-${toolCallId}`
+      : `thinking-${state.messages.length}-flush-${toolCallId}`
+    : seq !== undefined
+      ? `thinking-${seq}-0`
+      : `thinking-${state.messages.length}`;
+
+  if (state.messages.some((m) => m.id === id)) {
+    return {
+      ...state,
+      streamingThinking: "",
+      streamingThinkingCollapsed: false,
+      thinkingStartedAt: undefined,
+    };
+  }
+
+  const thinkingRow: ChatMessage = {
+    id,
+    role: "thinking",
+    content: state.streamingThinking,
+    timestamp,
+    startedAt,
+    duration,
+    streamedLive: state.streamingThinkingCollapsed ? false : isLive,
+    seq,
+  };
+
+  return {
+    ...state,
+    messages: [...state.messages, thinkingRow],
+    streamingThinking: "",
+    streamingThinkingCollapsed: false,
+    thinkingStartedAt: undefined,
+  };
+}
+
 export function flushStreamingTextAsAssistantRow(
   state: SessionState,
   timestamp: number,
@@ -1589,6 +1642,12 @@ export function reduceEvent(
       // Handle thinking events from assistantMessageEvent
       if (assistantEvent) {
         if (assistantEvent.type === "thinking_start") {
+          if (next.streamingThinking) {
+            Object.assign(
+              next,
+              flushStreamingThinkingAsRow(next, event.timestamp, isLive, seq),
+            );
+          }
           next.pendingThinking = "";
           next.streamingThinking = "";
           next.streamingThinkingCollapsed = false;
@@ -1848,6 +1907,12 @@ export function reduceEvent(
       // See change: fix-reducer-crash-undefined-toolname.
       const toolName = typeof data.toolName === "string" ? data.toolName : "unknown";
 
+      if (next.streamingThinking) {
+        Object.assign(
+          next,
+          flushStreamingThinkingAsRow(next, event.timestamp, isLive, seq, toolCallId),
+        );
+      }
       // Flush any pending streamingText into a permanent assistant row
       // BEFORE pushing the new toolResult, so the message's content-array
       // order is preserved in messages[] for the entire tool runtime —
