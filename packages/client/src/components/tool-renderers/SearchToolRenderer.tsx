@@ -1,7 +1,7 @@
 import { LinkifiedText } from "./LinkifiedText.js";
 import type { ToolRendererProps } from "./types.js";
 
-export function SearchToolRenderer({ toolName, args, status, result }: ToolRendererProps) {
+export function SearchToolRenderer({ toolName, args, status, result, context }: ToolRendererProps) {
   const query = (args?.query ?? args?.pattern ?? args?.glob ?? args?.search) as string | undefined;
   const path = (args?.path ?? args?.domain ?? args?.dir) as string | undefined;
 
@@ -21,7 +21,7 @@ export function SearchToolRenderer({ toolName, args, status, result }: ToolRende
 
       {result && (
         <div className="p-2 rounded bg-[var(--bg-code)] text-[var(--text-secondary)] font-mono whitespace-pre-wrap max-h-60 overflow-auto border border-[var(--border-subtle)]">
-          <LinkifiedText text={result} />
+          <LinkifiedText text={result} context={context} />
         </div>
       )}
     </div>
