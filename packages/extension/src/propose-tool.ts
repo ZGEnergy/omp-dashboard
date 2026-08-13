@@ -46,52 +46,6 @@ export const ProposeParametersSchema = Type.Object(
   { description: "Parameters for plan approval proposals" },
 );
 
-export const WriteParametersSchema = Type.Object(
-  {
-    path: Type.String({ description: "File path to write, or xd://propose for plan approval" }),
-    content: Type.String({ description: "Content to write" }),
-  },
-  { description: "Write parameters" },
-);
-type ToolDef = {
-  name: string;
-  label?: string;
-  description?: string;
-  parameters?: unknown;
-  execute: (
-    toolCallId: unknown,
-    params: unknown,
-    signal: unknown,
-    onUpdate: unknown,
-    ctx: unknown,
-  ) => Promise<unknown>;
-};
-
-function getExistingWriteTool(pi: ExtensionAPI): ToolDef | undefined {
-  const ext = pi as unknown as {
-    getAllTools?: () => ToolDef[];
-    getActiveTools?: () => ToolDef[];
-    tools?: Map<string, ToolDef>;
-  };
-  if (typeof ext.getAllTools === "function") {
-    const tools = ext.getAllTools();
-    if (Array.isArray(tools)) {
-      const found = tools.find((t) => t?.name === "write");
-      if (found) return found;
-    }
-  }
-  if (typeof ext.getActiveTools === "function") {
-    const tools = ext.getActiveTools();
-    if (Array.isArray(tools)) {
-      const found = tools.find((t) => t?.name === "write");
-      if (found) return found;
-    }
-  }
-  if (ext.tools instanceof Map) {
-    return ext.tools.get("write");
-  }
-  return undefined;
-}
 
 /**
  * Register plan approval host for `write xd://propose` / `xdev.tool === "propose"`.
@@ -210,27 +164,22 @@ export function registerProposeTool(
     return executePropose(toolCallId, params, signal);
   };
 
-  const existingWrite = getExistingWriteTool(pi);
-  if (existingWrite) {
-    pi.registerTool({
-      ...existingWrite,
-      name: "write",
-      label: existingWrite.label ?? "Write",
-      description: existingWrite.description ?? "Write content to a file",
-      parameters: existingWrite.parameters ?? WriteParametersSchema,
-      async execute(
-        toolCallId: unknown,
-        rawParams: unknown,
-        signal: unknown,
-        onUpdate: unknown,
-        ctx: unknown,
-      ) {
-        const params = (rawParams as Record<string, unknown>) ?? {};
-        if (isProposeWrite("write", params)) {
-          return executePropose(toolCallId, params, signal);
-        }
-        return existingWrite.execute(toolCallId, rawParams, signal, onUpdate, ctx);
-      },
+  if (typeof pi.on === "function") {
+    pi.on("tool_call", async (event: any, ctx: any) => {
+      const params = (event?.input as Record<string, unknown>) ?? {};
+      const toolName = typeof event?.toolName === "string" ? event.toolName : "";
+      if (toolName !== "propose" && isProposeWrite(toolName, params)) {
+        const res = await executePropose(
+          event?.toolCallId,
+          params,
+          ctx?.signal,
+        );
+        return {
+          block: true,
+          reason: res.content[0]?.text,
+        };
+      }
+      return undefined;
     });
   }
 
