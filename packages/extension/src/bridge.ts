@@ -276,15 +276,6 @@ export default function (pi: ExtensionAPI) {
     // sessions retain runtime registration to avoid static-name conflicts.
     if (dashboardSpawnedAtFactory) registerAskUserTool(pi);
 
-    /**
-     * Architecture Note & Core Gap:
-     * The `@oh-my-pi` TUI `#approvePlan` / `handlePlanApproval` continuation lives outside
-     * `omp-dashboard` and is external/unreachable.
-     * The plan-approval host for `write xd://propose` is implemented directly in
-     * `omp-dashboard` via `registerProposeTool`, issuing PromptBus `prompt_request` select prompts
-     * and dispatching approval via `onPlanApproved` / `pi.events.emit("plan:approved", ...)`.
-     */
-    registerProposeTool(pi, () => promptBus);
 
     initBridge(pi);
   } catch (err) {
@@ -2157,6 +2148,14 @@ function initBridge(pi: ExtensionAPI) {
     // live getter so its refs match the human Model Selector exactly.
     // See change: add-agent-role-model-tools.
     registerRoleModelTools(pi, { getRegistry: () => cachedModelRegistry });
+    /**
+     * Architecture Note & Core Gap:
+     * The `@oh-my-pi` TUI `#approvePlan` / `handlePlanApproval` continuation lives outside
+     * `omp-dashboard` and is external/unreachable.
+     * The plan-approval host for `write xd://propose` is implemented directly in
+     * `omp-dashboard` via `registerProposeTool`, issuing PromptBus `prompt_request` select prompts
+     * and dispatching approval via `onPlanApproved` / `pi.events.emit("plan:approved", ...)`.
+     */
     registerProposeTool(pi, () => promptBus);
 
     // Extract session file/dir early — needed for source detection and UI proxy

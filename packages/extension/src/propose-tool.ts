@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import pathModule from "node:path";
 import { isProposeWrite } from "@blackbelt-technology/pi-dashboard-shared/input-needed-tools.js";
-import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { PromptBus } from "./prompt-bus.js";
 
 export interface RegisterProposeToolOptions {
