@@ -219,6 +219,8 @@ export interface SessionState {
   toolCalls: Map<string, ToolCallState>;
   streamingText: string;
   streamingThinking: string;
+  /** Accumulator for in-flight thinking text across start/delta/end events. */
+  pendingThinking?: string;
   /**
    * True when the user manually collapsed the LIVE streaming reasoning block.
    * Lifts the collapse intent across the streaming→committed block swap so the
@@ -478,6 +480,7 @@ export function createInitialState(): SessionState {
     toolCalls: new Map(),
     streamingText: "",
     streamingThinking: "",
+    pendingThinking: undefined,
     streamingThinkingCollapsed: false,
     isStreaming: false,
     tokensIn: 0,
@@ -1375,6 +1378,7 @@ export function reduceEvent(
       next.isStreaming = true;
       next.status = "streaming";
       next.streamingText = "";
+      next.pendingThinking = undefined;
       next.pendingPrompt = undefined;
       // lastError is NOT cleared here. The error anchor persists across the
       // start of a retry/continuation turn and clears only on a confirmed
@@ -1403,6 +1407,7 @@ export function reduceEvent(
       next.isStreaming = false;
       next.status = "idle";
       next.streamingText = "";
+      next.pendingThinking = undefined;
       next.currentTool = undefined;
       next.pendingPrompt = undefined;
       const errorMsg = extractAgentEndError(data);
@@ -1584,24 +1589,28 @@ export function reduceEvent(
       // Handle thinking events from assistantMessageEvent
       if (assistantEvent) {
         if (assistantEvent.type === "thinking_start") {
+          next.pendingThinking = "";
           next.streamingThinking = "";
           next.streamingThinkingCollapsed = false;
           next.thinkingStartedAt = event.timestamp;
           break;
         }
         if (assistantEvent.type === "thinking_delta") {
-          next.streamingThinking = next.streamingThinking + (assistantEvent.delta ?? "");
+          const accumulated = (next.pendingThinking ?? "") + (assistantEvent.delta ?? "");
+          next.pendingThinking = accumulated;
+          next.streamingThinking = isLive ? accumulated : "";
           break;
         }
         if (assistantEvent.type === "thinking_end") {
-          if (next.streamingThinking) {
+          const content = next.pendingThinking ?? next.streamingThinking;
+          if (content) {
             const startedAt = next.thinkingStartedAt;
             next.messages = [
               ...next.messages,
               {
                 id: seq !== undefined ? `thinking-${seq}-0` : `thinking-${next.messages.length}`,
                 role: "thinking",
-                content: next.streamingThinking,
+                content,
                 timestamp: event.timestamp,
                 startedAt,
                 duration: startedAt ? event.timestamp - startedAt : undefined,
@@ -1610,6 +1619,7 @@ export function reduceEvent(
               },
             ];
           }
+          next.pendingThinking = undefined;
           next.streamingThinking = "";
           next.streamingThinkingCollapsed = false;
           next.thinkingStartedAt = undefined;

@@ -675,7 +675,7 @@ describe("thinking events", () => {
         message: { role: "assistant", content: [] },
         assistantMessageEvent: { type: "thinking_start", contentIndex: 0 },
       },
-    });
+    }, { isLive: true });
     state = reduceEvent(state, {
       eventType: "message_update",
       timestamp: Date.now(),
@@ -683,7 +683,7 @@ describe("thinking events", () => {
         message: { role: "assistant", content: [] },
         assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "Let me think" },
       },
-    });
+    }, { isLive: true });
     state = reduceEvent(state, {
       eventType: "message_update",
       timestamp: Date.now(),
@@ -691,7 +691,7 @@ describe("thinking events", () => {
         message: { role: "assistant", content: [] },
         assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: " about this..." },
       },
-    });
+    }, { isLive: true });
     expect(state.streamingThinking).toBe("Let me think about this...");
   });
 
@@ -1466,18 +1466,17 @@ describe("command_feedback events", () => {
     });
 
     it("should track thinkingStartedAt for live counter during streaming", () => {
-      const state = applyEvents([
-        {
-          eventType: "message_update",
-          timestamp: 2000,
-          data: { assistantMessageEvent: { type: "thinking_start", contentIndex: 0 } },
-        },
-        {
-          eventType: "message_update",
-          timestamp: 2500,
-          data: { assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "still thinking" } },
-        },
-      ]);
+      let state = createInitialState();
+      state = reduceEvent(state, {
+        eventType: "message_update",
+        timestamp: 2000,
+        data: { assistantMessageEvent: { type: "thinking_start", contentIndex: 0 } },
+      }, { isLive: true });
+      state = reduceEvent(state, {
+        eventType: "message_update",
+        timestamp: 2500,
+        data: { assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "still thinking" } },
+      }, { isLive: true });
       // While still streaming, thinkingStartedAt is set
       expect(state.thinkingStartedAt).toBe(2000);
       expect(state.streamingThinking).toBe("still thinking");
