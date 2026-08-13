@@ -60,6 +60,8 @@ import { collectMetrics, startMetricsMonitor, stopMetricsMonitor } from "./proce
 import { getOwnPgid, scanChildProcesses } from "./process-scanner.js";
 import { PromptBus } from "./prompt-bus.js";
 import { expandPromptTemplateFromDisk } from "./prompt-expander.js";
+import { getOrCreatePristineOriginals } from "./ctx-ui-originals.js";
+
 import {
   activate as activateProviderRegister,
   buildProviderCatalogue,
@@ -2189,24 +2191,9 @@ function initBridge(pi: ExtensionAPI) {
     // Register built-in default adapter (always present, works without pi-flows)
     promptBus.registerAdapter(new DashboardDefaultAdapter());
 
-    // Capture original ctx.ui method references BEFORE patching
-    const originalNotify = ctx.ui.notify?.bind(ctx.ui);
-    const originals = {
-      select: ctx.ui.select?.bind(ctx.ui) as ((q: string, opts: string[], extra?: any) => Promise<string | undefined>) | undefined,
-      input: ctx.ui.input?.bind(ctx.ui) as ((q: string, placeholder?: string, extra?: any) => Promise<string | undefined>) | undefined,
-      confirm: ctx.ui.confirm?.bind(ctx.ui) as ((q: string, msg: string, extra?: any) => Promise<boolean>) | undefined,
-      editor: ctx.ui.editor?.bind(ctx.ui) as ((q: string, prefill?: string, extra?: any) => Promise<string | undefined>) | undefined,
-      // NOTE: the `custom` field is intentionally NOT captured here. A
-      // previous change (fix-multiselect-auto-cancel-on-dashboard) added a
-      // TUI multiselect arm that awaited the original ctx.ui.custom binding,
-      // but pi 0.70's RPC mode defines that primitive as a no-op (returns
-      // undefined synchronously), causing the TUI adapter to auto-cancel the
-      // dashboard-rendered dialog within one event-loop tick. The arm has
-      // been removed; see change fix-multiselect-tui-arm-self-cancel for full
-      // rationale. A repo lint (no-tui-multiselect-arm-regression.test.ts)
-      // prevents reintroduction by banning the co-occurrence of two
-      // substrings (the captured original binding and the TUI arm match).
-    };
+    // Capture original ctx.ui method references BEFORE patching (idempotent per ctx.ui)
+    const originals = getOrCreatePristineOriginals(ctx.ui);
+    const originalNotify = originals.notify;
 
     // Register TUI adapter — presents prompts in the terminal using original
     // (unpatched) ctx.ui methods. Must be registered BEFORE patching ctx.ui.
@@ -2338,9 +2325,14 @@ function initBridge(pi: ExtensionAPI) {
                   source: "tui",
                 });
               }
-            } catch {
+            } catch (err) {
               if (!ac.signal.aborted) {
-                bus.respond({ id: prompt.id, cancelled: true, source: "tui" });
+                bus.respond({
+                  id: prompt.id,
+                  cancelled: false,
+                  error: err instanceof Error ? err.message : String(err),
+                  source: "tui",
+                });
               }
             } finally {
               activeControllers.delete(prompt.id);
@@ -2395,15 +2387,17 @@ function initBridge(pi: ExtensionAPI) {
         return meta;
       };
 
-      (ctx.ui as any).select = (title: string, options: string[], opts?: any) =>
+      const selectWrapper = (title: string, options: string[], opts?: any) =>
         bus
           .request(
             { pipeline: "command", type: "select", question: title, options, metadata: buildMeta(opts) },
             opts?.signal,
           )
           .then((r) => (r.cancelled ? undefined : r.answer));
+      (selectWrapper as any).__isPromptBusWrapper = true;
+      (ctx.ui as any).select = selectWrapper;
 
-      (ctx.ui as any).input = (title: string, placeholder?: string, opts?: any) =>
+      const inputWrapper = (title: string, placeholder?: string, opts?: any) =>
         bus
           .request(
             {
@@ -2416,6 +2410,8 @@ function initBridge(pi: ExtensionAPI) {
             opts?.signal,
           )
           .then((r) => (r.cancelled ? undefined : r.answer));
+      (inputWrapper as any).__isPromptBusWrapper = true;
+      (ctx.ui as any).input = inputWrapper;
 
       // Persist pasted images for an ask_user input answer to disk + emit one
       // asset_register per new hash (dashboard thumbnail). Returns absolute
@@ -2457,7 +2453,7 @@ function initBridge(pi: ExtensionAPI) {
       // to: undefined (cancel) | string (no images) | {value, attachments}
       // (images). See change: add-ask-user-input-multiline-paste, design.md
       // Decision 1.
-      (ctx.ui as any).inputWithImages = (title: string, placeholder?: string, opts?: any) =>
+      const inputWithImagesWrapper = (title: string, placeholder?: string, opts?: any) =>
         bus
           .request(
             {
@@ -2474,16 +2470,20 @@ function initBridge(pi: ExtensionAPI) {
             const atts = r.images?.length ? persistAnswerImages(r.images) : [];
             return atts.length ? { value: r.answer ?? "", attachments: atts } : (r.answer ?? "");
           });
+      (inputWithImagesWrapper as any).__isPromptBusWrapper = true;
+      (ctx.ui as any).inputWithImages = inputWithImagesWrapper;
 
-      (ctx.ui as any).confirm = (title: string, message?: string, opts?: any) =>
+      const confirmWrapper = (title: string, message?: string, opts?: any) =>
         bus
           .request(
             { pipeline: "command", type: "confirm", question: title, metadata: buildMeta(opts, message) },
             opts?.signal,
           )
           .then((r) => !r.cancelled && r.answer === "true");
+      (confirmWrapper as any).__isPromptBusWrapper = true;
+      (ctx.ui as any).confirm = confirmWrapper;
 
-      (ctx.ui as any).editor = (title: string, prefill?: string, opts?: any) =>
+      const editorWrapper = (title: string, prefill?: string, opts?: any) =>
         bus
           .request(
             {
@@ -2496,6 +2496,8 @@ function initBridge(pi: ExtensionAPI) {
             opts?.signal,
           )
           .then((r) => (r.cancelled ? undefined : r.answer));
+      (editorWrapper as any).__isPromptBusWrapper = true;
+      (ctx.ui as any).editor = editorWrapper;
 
       // ── Multiselect ──────────────────────────────────────────────
       // ctx.ui.multiselect is NOT a built-in pi method — we attach it here
@@ -2513,7 +2515,7 @@ function initBridge(pi: ExtensionAPI) {
         // eslint-disable-next-line no-console
         console.warn("[bridge] ctx.ui.multiselect already exists — overriding for PromptBus routing");
       }
-      (ctx.ui as any).multiselect = (title: string, options: string[], opts?: any) =>
+      const multiselectWrapper = (title: string, options: string[], opts?: any) =>
         bus
           .request(
             {
@@ -2526,6 +2528,8 @@ function initBridge(pi: ExtensionAPI) {
             opts?.signal,
           )
           .then(decodeMultiselectAnswer);
+      (multiselectWrapper as any).__isPromptBusWrapper = true;
+      (ctx.ui as any).multiselect = multiselectWrapper;
 
       // ── Batch ────────────────────────────────────────────────────
       // ctx.ui.batch is NOT a built-in pi method. The ask_user tool calls it
@@ -2535,7 +2539,7 @@ function initBridge(pi: ExtensionAPI) {
       // `answer` string). Resolves to BatchAnswer[] on submit, or undefined on
       // cancel. See change: redesign-ask-user-question-cards.
       // TUI: sequential originals.* via the batch arm above (fix: multi-ask hang).
-      (ctx.ui as any).batch = (title: string, questions: unknown[], opts?: any) =>
+      const batchWrapper = (title: string, questions: unknown[], opts?: any) =>
         bus
           .request(
             {
@@ -2566,9 +2570,11 @@ function initBridge(pi: ExtensionAPI) {
               return undefined;
             }
           });
+      (batchWrapper as any).__isPromptBusWrapper = true;
+      (ctx.ui as any).batch = batchWrapper;
 
       // Notify is fire-and-forget: call original + forward to dashboard
-      (ctx.ui as any).notify = (message: string, level?: string) => {
+      const notifyWrapper = (message: string, level?: string) => {
         originalNotify?.(message, level);
         connection.send({
           type: "prompt_request" as any,
@@ -2579,6 +2585,8 @@ function initBridge(pi: ExtensionAPI) {
           placement: "inline",
         });
       };
+      (notifyWrapper as any).__isPromptBusWrapper = true;
+      (ctx.ui as any).notify = notifyWrapper;
     }
 
     // Flip ctx.hasUI=true now that ctx.ui.* has been patched to route

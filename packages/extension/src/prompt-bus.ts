@@ -38,6 +38,7 @@ export interface PromptResponse {
   id: string;
   answer?: string;
   cancelled?: boolean;
+  error?: string;
   source: string;
   /**
    * Optional pasted images riding alongside a `type:"input"` answer.
@@ -166,8 +167,12 @@ export class PromptBus {
           if (claim) {
             claims.push({ adapter, claim });
           }
-        } catch {
+        } catch (err) {
           // Adapter error — skip it
+          console.error(
+            `[PromptBus] Adapter "${adapter.name}" threw during onRequest:`,
+            err,
+          );
         }
       }
 
