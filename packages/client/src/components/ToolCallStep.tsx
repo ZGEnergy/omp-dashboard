@@ -11,6 +11,7 @@ import type { ChatImage } from "../lib/event-reducer.js";
 import { TRUNCATION_MARKER_PREFIX } from "../lib/event-reducer.js";
 import { t as i18nT } from "../lib/i18n";
 import { getSummary } from "../lib/tool-summary.js";
+import { unwrapXdToolCall } from "../lib/unwrap-xd.js";
 import { ElapsedBadge } from "./ElapsedBadge.js";
 import { ErrorBoundary } from "./ErrorBoundary.js";
 import { ToolStubRow } from "./ToolStubRow.js";
@@ -87,14 +88,15 @@ const statusIcons: Record<string, ReactNode> = {
 };
 
 export function ToolCallStep({ toolName, toolCallId, args, status, result, images, context, startedAt, duration, toolDetails, showResultBody = true, hideStatusIcon = false, onAbort, onForceKill, isSuperseded = false, toolStub }: Props) {
+  const { effectiveToolName, effectiveArgs } = unwrapXdToolCall(toolName, args, toolDetails);
   const isMobile = useMobile();
   const hasImages = images && images.length > 0;
-  const isAgentRunning = toolName === "Agent" && status === "running";
-  const isInputTool = isInputNeededTool(toolName, args);
+  const isAgentRunning = effectiveToolName === "Agent" && status === "running";
+  const isInputTool = isInputNeededTool(effectiveToolName, args);
   const isFailedInputTool = isInputTool && status === "error";
   const [expanded, setExpanded] = useState(hasImages || isAgentRunning || (isInputTool && !isFailedInputTool));
   const [stopState, setStopState] = useState<StopState>("idle");
-  const Renderer = getToolRenderer(toolName);
+  const Renderer = getToolRenderer(effectiveToolName);
   const pendingInteractiveRequest = context.session?.interactiveRequests.find(
     (request) => request.status === "pending" && request.toolCallId === toolCallId,
   );
@@ -123,14 +125,13 @@ export function ToolCallStep({ toolName, toolCallId, args, status, result, image
   const registry = useSlotRegistryOrNull();
   const pluginClaim = React.useMemo<ClaimEntry | null>(() => {
     if (!registry) return null;
-    const claims = forToolName(registry.getClaims("tool-renderer"), toolName);
+    const claims = forToolName(registry.getClaims("tool-renderer"), effectiveToolName);
     for (const c of claims) {
-      if (claimShouldRender(c, toolName)) return c;
+      if (claimShouldRender(c, effectiveToolName)) return c;
     }
     return null;
-  }, [registry, toolName]);
+  }, [registry, effectiveToolName]);
   const PluginComponent = pluginClaim?.Component;
-
   // Reset stop state when tool finishes
   React.useEffect(() => {
     if (status !== "running") setStopState("idle");
@@ -174,7 +175,7 @@ export function ToolCallStep({ toolName, toolCallId, args, status, result, image
     <div className={`${isMobile ? "mx-2" : "mx-4"} border-l-2 border-[var(--border-secondary)] pl-3`}>
       <button
         onClick={() => setExpanded(!expanded)}
-        title={getSummary(toolName, args)}
+        title={getSummary(effectiveToolName, effectiveArgs)}
         className={`flex items-center gap-1.5 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] w-full text-left ${isMobile ? "min-h-[44px] py-2" : ""}`}
       >
         {!hideStatusIcon && (
@@ -192,7 +193,7 @@ export function ToolCallStep({ toolName, toolCallId, args, status, result, image
               : statusIcons[status]}
           </span>
         )}
-        <span className="truncate">{getSummary(toolName, args)}</span>
+        <span className="truncate">{getSummary(effectiveToolName, effectiveArgs)}</span>
         <ElapsedBadge startedAt={startedAt} duration={duration} />
         {isSuperseded && (
           <span
@@ -243,8 +244,8 @@ export function ToolCallStep({ toolName, toolCallId, args, status, result, image
             {PluginComponent && pluginClaim ? (
               <CurrentPluginLayer pluginId={pluginClaim.pluginId}>
                 <PluginComponent
-                  toolName={toolName}
-                  toolInput={args ?? {}}
+                  toolName={effectiveToolName}
+                  toolInput={effectiveArgs}
                   sessionId={context.sessionId ?? ""}
                   status={status}
                   result={displayResult}
@@ -255,9 +256,9 @@ export function ToolCallStep({ toolName, toolCallId, args, status, result, image
               </CurrentPluginLayer>
             ) : (
               <Renderer
-                toolName={toolName}
+                toolName={effectiveToolName}
                 toolCallId={toolCallId}
-                args={args}
+                args={effectiveArgs}
                 status={status}
                 result={displayResult}
                 images={images}

@@ -37,6 +37,7 @@ import type { ToolBurstGroup as ToolBurstGroupData } from "../lib/group-tool-bur
 import type { ChatItem, ToolCallGroup } from "../lib/group-tool-calls.js";
 import { t as i18nT } from "../lib/i18n";
 import { getSummary, getToolIcon } from "../lib/tool-summary.js";
+import { unwrapXdToolCall } from "../lib/unwrap-xd.js";
 import { CollapsedToolGroup } from "./CollapsedToolGroup.js";
 import { MarkdownContent } from "./MarkdownContent.js";
 import { ThinkingBlock } from "./ThinkingBlock.js";
@@ -75,8 +76,8 @@ function formatDuration(ms: number): string {
 function breakdown(members: ChatMessage[]): { name: string; icon: string; count: number }[] {
   const counts = new Map<string, number>();
   for (const m of members) {
-    const name = m.toolName ?? "unknown";
-    counts.set(name, (counts.get(name) ?? 0) + 1);
+    const { effectiveToolName } = unwrapXdToolCall(m.toolName ?? "unknown", m.args, m.toolDetails);
+    counts.set(effectiveToolName, (counts.get(effectiveToolName) ?? 0) + 1);
   }
   return [...counts.entries()].map(([name, count]) => ({ name, icon: getToolIcon(name), count }));
 }
@@ -195,10 +196,12 @@ export function ToolBurstGroup({ burst, toolContext }: Props) {
   const doneCount = visibleMembers.filter((m) => m.toolStatus !== "running").length;
   const failedCount = visibleMembers.filter((m) => m.toolStatus === "error").length;
   const runningMember = visibleMembers.find((m) => m.toolStatus === "running");
-  const liveCommand = runningMember ? getSummary(runningMember.toolName ?? "unknown", runningMember.args) : "";
+  const runningUnwrapped = runningMember ? unwrapXdToolCall(runningMember.toolName ?? "unknown", runningMember.args, runningMember.toolDetails) : null;
+  const liveCommand = runningUnwrapped ? getSummary(runningUnwrapped.effectiveToolName, runningUnwrapped.effectiveArgs) : "";
   const durationMs = totalDuration(visibleMembers);
   const single = total === 1;
   const soleMember = visibleMembers[0];
+  const soleUnwrapped = unwrapXdToolCall(soleMember.toolName ?? "unknown", soleMember.args, soleMember.toolDetails);
 
   // ── Slots ────────────────────────────────────────────────────────────────
   const leftGlyph = (
@@ -206,7 +209,7 @@ export function ToolBurstGroup({ burst, toolContext }: Props) {
       className={`inline-flex ${isRunning ? "text-yellow-400 tool-group-spin-pulse" : "text-green-400"} ${flash ? "tool-group-flash" : ""}`}
     >
       <Icon
-        path={isRunning ? mdiLoading : single ? getToolIcon(soleMember.toolName ?? "unknown") : mdiCheck}
+        path={isRunning ? mdiLoading : single ? getToolIcon(soleUnwrapped.effectiveToolName) : mdiCheck}
         size={0.55}
         spin={isRunning}
       />
@@ -356,10 +359,11 @@ function headerSlots(p: {
   }
   if (p.single) {
     // Single completed call: tool icon (in leftGlyph) + its own summary + duration.
+    const { effectiveToolName, effectiveArgs } = unwrapXdToolCall(p.soleMember.toolName ?? "unknown", p.soleMember.args, p.soleMember.toolDetails);
     return {
       title: (
         <span className="truncate text-[var(--text-secondary)]" data-testid="tool-burst-summary">
-          {getSummary(p.soleMember.toolName ?? "unknown", p.soleMember.args)}
+          {getSummary(effectiveToolName, effectiveArgs)}
         </span>
       ),
       meta: (
