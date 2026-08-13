@@ -32,6 +32,21 @@ describe("ctx.ui session_start re-patch & error handling regression (#115)", () 
     expect(patchedSelect).not.toHaveBeenCalled();
   });
 
+  it("warns when capturing an un-cached ui object with an already-wrapped method", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const wrappedSelect = vi.fn();
+    (wrappedSelect as any).__isPromptBusWrapper = true;
+    const uiWithWrapped = { select: wrappedSelect };
+
+    getOrCreatePristineOriginals(uiWithWrapped);
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[bridge] getOrCreatePristineOriginals: captured an already-wrapped ui method"
+    );
+    warnSpy.mockRestore();
+  });
+
+
   it("(b) after N (>=10) patch cycles, invoking select does not RangeError or recurse through previous wrappers", async () => {
     let nativeCallCount = 0;
     const mockNativeSelect = vi.fn().mockImplementation(async () => {

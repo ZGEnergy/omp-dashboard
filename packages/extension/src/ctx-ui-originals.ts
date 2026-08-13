@@ -23,6 +23,15 @@ export function getOrCreatePristineOriginals(ui: any): PristineUiOriginals {
     return existing;
   }
 
+  // Dev warning if ui method is already wrapped
+  const keys: (keyof PristineUiOriginals)[] = ['notify', 'select', 'input', 'confirm', 'editor'];
+  for (const key of keys) {
+    if (typeof ui[key] === 'function' && (ui[key] as any).__isPromptBusWrapper) {
+      console.warn('[bridge] getOrCreatePristineOriginals: captured an already-wrapped ui method');
+      break;
+    }
+  }
+
   const captured: PristineUiOriginals = {
     notify: typeof ui.notify === 'function' ? ui.notify.bind(ui) : undefined,
     select: typeof ui.select === 'function' ? ui.select.bind(ui) : undefined,
@@ -30,14 +39,6 @@ export function getOrCreatePristineOriginals(ui: any): PristineUiOriginals {
     confirm: typeof ui.confirm === 'function' ? ui.confirm.bind(ui) : undefined,
     editor: typeof ui.editor === 'function' ? ui.editor.bind(ui) : undefined,
   };
-
-  // Dev warning if captured method is already wrapped
-  for (const fn of Object.values(captured)) {
-    if (fn && (fn as any).__isPromptBusWrapper) {
-      console.warn('[bridge] getOrCreatePristineOriginals: captured an already-wrapped ui method');
-      break;
-    }
-  }
 
   pristineUiMap.set(ui, captured);
   return captured;
