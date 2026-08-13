@@ -692,7 +692,8 @@ describe("thinking events", () => {
         assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: " about this..." },
       },
     });
-    expect(state.streamingThinking).toBe("Let me think about this...");
+    expect(state.streamingThinking).toBe("");
+    expect(state.pendingThinking).toBe("Let me think about this...");
   });
 
   it("should create thinking message on thinking_end and reset streamingThinking", () => {
@@ -1478,9 +1479,9 @@ describe("command_feedback events", () => {
           data: { assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "still thinking" } },
         },
       ]);
-      // While still streaming, thinkingStartedAt is set
       expect(state.thinkingStartedAt).toBe(2000);
-      expect(state.streamingThinking).toBe("still thinking");
+      expect(state.streamingThinking).toBe("");
+      expect(state.pendingThinking).toBe("still thinking");
     });
 
     it("should clear thinkingStartedAt on thinking_end", () => {

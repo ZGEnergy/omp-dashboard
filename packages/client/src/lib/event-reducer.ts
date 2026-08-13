@@ -478,6 +478,7 @@ export function createInitialState(): SessionState {
     toolCalls: new Map(),
     streamingText: "",
     streamingThinking: "",
+    pendingThinking: "",
     streamingThinkingCollapsed: false,
     isStreaming: false,
     tokensIn: 0,
@@ -1580,28 +1581,31 @@ export function reduceEvent(
 
     case "message_update": {
       const assistantEvent = data.assistantMessageEvent as any;
-
       // Handle thinking events from assistantMessageEvent
       if (assistantEvent) {
         if (assistantEvent.type === "thinking_start") {
           next.streamingThinking = "";
+          next.pendingThinking = "";
           next.streamingThinkingCollapsed = false;
           next.thinkingStartedAt = event.timestamp;
           break;
         }
         if (assistantEvent.type === "thinking_delta") {
-          next.streamingThinking = next.streamingThinking + (assistantEvent.delta ?? "");
+          const delta = assistantEvent.delta ?? "";
+          if (isLive) next.streamingThinking = next.streamingThinking + delta;
+          else next.pendingThinking = next.pendingThinking + delta;
           break;
         }
         if (assistantEvent.type === "thinking_end") {
-          if (next.streamingThinking) {
+          const acc = isLive ? next.streamingThinking : next.pendingThinking;
+          if (acc) {
             const startedAt = next.thinkingStartedAt;
             next.messages = [
               ...next.messages,
               {
                 id: seq !== undefined ? `thinking-${seq}-0` : `thinking-${next.messages.length}`,
                 role: "thinking",
-                content: next.streamingThinking,
+                content: acc,
                 timestamp: event.timestamp,
                 startedAt,
                 duration: startedAt ? event.timestamp - startedAt : undefined,
@@ -1611,6 +1615,7 @@ export function reduceEvent(
             ];
           }
           next.streamingThinking = "";
+          next.pendingThinking = "";
           next.streamingThinkingCollapsed = false;
           next.thinkingStartedAt = undefined;
           break;

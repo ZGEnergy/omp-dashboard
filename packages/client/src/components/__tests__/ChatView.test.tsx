@@ -2,7 +2,9 @@ import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { act, fireEvent, render } from "@testing-library/react";
 import React from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { DISPLAY_PRESETS } from "@blackbelt-technology/pi-dashboard-shared/display-prefs.js";
 import { type ChatMessage, createInitialState, type PendingPrompt } from "../../lib/event-reducer.js";
+import { DisplayPrefsProvider } from "../../lib/DisplayPrefsContext.js";
 import { ChatView } from "../ChatView.js";
 import { ThemeProvider } from "../ThemeProvider.js";
 import type { ToolContext } from "../tool-renderers/index.js";
@@ -933,5 +935,37 @@ describe("renderRows derivation timing", () => {
     expect(sid).toBe("s1");
     expect(Number.isFinite(ms)).toBe(true);
     expect(ms).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("ChatView replay thinking chrome", () => {
+  function renderVerbose(state: ReturnType<typeof createInitialState>) {
+    return render(
+      <ThemeProvider>
+        <DisplayPrefsProvider
+          value={{ global: DISPLAY_PRESETS.everything, getSessionOverride: () => undefined }}
+        >
+          <ChatView state={state} toolContext={defaultToolContext} />
+        </DisplayPrefsProvider>
+      </ThemeProvider>,
+    );
+  }
+
+  it("does not paint live reasoning from replay pendingThinking", () => {
+    const state = createInitialState();
+    state.pendingThinking = "random mid-batch thought";
+    state.thinkingStartedAt = 1100;
+    const { container } = renderVerbose(state);
+    expect(container.querySelector("[data-testid='reasoning-block']")).toBeNull();
+    expect(container.textContent).not.toContain("random mid-batch thought");
+  });
+
+  it("paints live reasoning from streamingThinking", () => {
+    const state = createInitialState();
+    state.streamingThinking = "live thought";
+    state.thinkingStartedAt = 1100;
+    const { container } = renderVerbose(state);
+    expect(container.querySelector("[data-testid='reasoning-block']")).not.toBeNull();
+    expect(container.textContent).toContain("live thought");
   });
 });

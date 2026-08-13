@@ -5,3 +5,5 @@
 See change: fix-stale-answered-ask-replay — skip stale prompt_request when toolCallId already complete; dismiss pending interactive on tool_execution_end.
 
 See change: hot-window-metrics — exports `estimateDerivedDetailBytes(state)`: sum of `byteLengthOf(sub.entries)` over `state.subagents` (serialized bytes of derived subagent detail timelines, content-free byte count only). Feeds `HotWindowReport.detailBytes`.
+
+`pendingThinking` replay-only thinking accumulator. `thinking_delta` writes `streamingThinking` only when `isLive`. Replay fills `pendingThinking`; `thinking_end` commits from it. ChatView live ThinkingBlock reads `streamingThinking` — mid-thought cold batches must not flash.

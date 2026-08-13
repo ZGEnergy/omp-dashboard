@@ -7,6 +7,10 @@
  * live path (`reduceEvent(..., { isLive: true })`). The replay path (omitting
  * opts, or passing `isLive:false`) leaves it falsy, so cold-loaded / replayed
  * reasoning never arms the auto-collapse timer.
+ *
+ * Replay also must not populate `streamingThinking` — ChatView paints that as
+ * an expanded live ThinkingBlock, so mid-thought cold-replay batches flash
+ * random reasoning. thinking_end still commits the historical row.
  */
 
 import type { DashboardEvent } from "@blackbelt-technology/pi-dashboard-shared/types.js";
@@ -71,5 +75,36 @@ describe("thinking provenance (streamedLive)", () => {
     expect(thinking?.streamedLive).toBe(false);
     // Flag reset after flush.
     expect(s.streamingThinkingCollapsed).toBe(false);
+  });
+});
+
+describe("replay must not populate streamingThinking", () => {
+  it("leaves streamingThinking empty across a mid-thought replay batch", () => {
+    const [start, delta] = thinkingEvents();
+    let s = createInitialState();
+    s = reduceEvent(s, start);
+    s = reduceEvent(s, delta);
+    expect(s.streamingThinking).toBe("");
+    expect(s.pendingThinking).toBe("pondering…");
+    expect(s.messages.filter((m) => m.role === "thinking")).toHaveLength(0);
+  });
+
+  it("commits a historical thinking row on thinking_end without live chrome", () => {
+    const s = reduceAll(thinkingEvents());
+    expect(s.streamingThinking).toBe("");
+    expect(s.thinkingStartedAt).toBeUndefined();
+    const thinking = s.messages.filter((m) => m.role === "thinking");
+    expect(thinking).toHaveLength(1);
+    expect(thinking[0].content).toBe("pondering…");
+    expect(thinking[0].streamedLive).toBeFalsy();
+  });
+
+  it("still fills streamingThinking on the live path", () => {
+    const [start, delta] = thinkingEvents();
+    let s = createInitialState();
+    s = reduceEvent(s, start, { isLive: true });
+    s = reduceEvent(s, delta, { isLive: true });
+    expect(s.streamingThinking).toBe("pondering…");
+    expect(s.thinkingStartedAt).toBe(1100);
   });
 });
