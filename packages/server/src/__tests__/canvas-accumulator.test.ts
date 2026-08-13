@@ -209,6 +209,10 @@ describe("canvas accumulator", () => {
       acc.onEvent("s1", { eventType: "tool_execution_end", data: { toolName: "write", args: { path: tmpFile }, isError: true } }, live);
       expect(recorded).toHaveLength(0);
 
+      // canvas() declare tool_execution_end MUST NOT record provenance
+      acc.onEvent("s1", { eventType: "tool_execution_end", data: { toolName: "canvas", args: { target: { kind: "file", path: "/etc/passwd" } } } }, live);
+      expect(recorded).toHaveLength(0);
+
       // Non-existent file tool_execution_end MUST NOT record provenance
       acc.onEvent("s1", { eventType: "tool_execution_end", data: { toolName: "write", args: { path: "/non/existent/file.txt" } } }, live);
       expect(recorded).toHaveLength(0);

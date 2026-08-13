@@ -9,6 +9,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { createMemorySessionManager, type SessionManager } from "../memory-session-manager.js";
 import type { PreferencesStore } from "../preferences-store.js";
 import { registerFileRoutes } from "../routes/file-routes.js";
+import { isAllowed } from "../lib/path-containment.js";
 
 describe("session-provenance out-of-cwd containment", () => {
   let tmpDir: string;
@@ -88,6 +89,12 @@ describe("session-provenance out-of-cwd containment", () => {
     });
     expect(res.statusCode).toBe(403);
   });
+  it("canvas declare of /etc/passwd does NOT make isAllowed true", async () => {
+    // Simulate tool_execution_end event for canvas declare of /etc/passwd through canvas accumulator
+    // Or test path-containment directly: session provenance empty -> isAllowed is false
+    expect(await isAllowed("/etc/passwd", { anchors: [sessionCwd], provenancePaths: sessionManager.getProvenancePathsForCwd(sessionCwd) })).toBe(false);
+  });
+
 
   it("allows exact out-of-cwd file after successful write (e.g. /tmp/foo.md)", async () => {
     const tmpFoo = path.join(os.tmpdir(), `foo-${Date.now()}.md`);

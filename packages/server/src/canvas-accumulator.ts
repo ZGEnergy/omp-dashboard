@@ -140,14 +140,7 @@ export function createCanvasAccumulator(
     const args = event.data?.args as Record<string, unknown> | undefined;
 
     const toolLower = toolName.toLowerCase();
-    if (toolLower === "canvas") {
-      if (args?.target && typeof args.target === "object") {
-        const target = args.target as { kind?: unknown; path?: unknown };
-        if (target.kind === "file" && typeof target.path === "string") {
-          recordProvenance(sessionId, target.path, cwd);
-        }
-      }
-    } else if (toolLower === "write" || toolLower === "edit" || toolLower === "ast_edit") {
+    if (toolLower === "write" || toolLower === "edit" || toolLower === "ast_edit") {
       if (typeof args?.path === "string") {
         recordProvenance(sessionId, args.path, cwd);
       }

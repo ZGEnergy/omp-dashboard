@@ -80,6 +80,7 @@ export async function resolveFileMention(
   // Containment BEFORE stat (design D2). Anchors: cwd + fixed `~/.pi`; git-root
   // widening comes from isAllowed's layer ②.
   if (!(await isAllowed(candidate, { anchors: [cwd, homePiAnchor()], provenancePaths }))) {
+    return null;
   }
   try {
     await fs.stat(candidate);
