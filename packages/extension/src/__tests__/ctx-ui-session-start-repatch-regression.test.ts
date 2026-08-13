@@ -46,6 +46,32 @@ describe("ctx.ui session_start re-patch & error handling regression (#115)", () 
     warnSpy.mockRestore();
   });
 
+  it("survives module reload without recapturing wrappers (jiti)", async () => {
+    const nativeSelect = vi.fn().mockResolvedValue("option1");
+    const mockUi = {
+      select: nativeSelect,
+      input: vi.fn(),
+      confirm: vi.fn(),
+      editor: vi.fn(),
+      notify: vi.fn(),
+    };
+
+    getOrCreatePristineOriginals(mockUi);
+    const wrapper = vi.fn();
+    (wrapper as any).__isPromptBusWrapper = true;
+    mockUi.select = wrapper;
+
+    vi.resetModules();
+    const { getOrCreatePristineOriginals: getAfterReload } = await import(
+      "../ctx-ui-originals.js"
+    );
+    const orig2 = getAfterReload(mockUi);
+    await orig2.select!("q", ["a"]);
+
+    expect(nativeSelect).toHaveBeenCalledWith("q", ["a"]);
+    expect(wrapper).not.toHaveBeenCalled();
+  });
+
 
   it("(b) after N (>=10) patch cycles, invoking select does not RangeError or recurse through previous wrappers", async () => {
     let nativeCallCount = 0;

@@ -1,45 +1,54 @@
 /**
  * Pristine ctx.ui method originals cache.
- * Keyed by ctx.ui object identity to guarantee idempotence across session_start calls.
+ * Keyed by ctx.ui object identity. Stored on `process` so jiti module-cache
+ * invalidation cannot recapture PromptBus wrappers as natives (same pattern
+ * as bridge.ts BRIDGE_KEY).
  */
 
 export interface PristineUiOriginals {
   notify?: (message: string, level?: string) => void;
-  select?: (q: string, opts: string[], extra?: any) => Promise<string | undefined>;
-  input?: (q: string, placeholder?: string, extra?: any) => Promise<string | undefined>;
-  confirm?: (q: string, msg: string, extra?: any) => Promise<boolean>;
-  editor?: (q: string, prefill?: string, extra?: any) => Promise<string | undefined>;
+  select?: (q: string, opts: string[], extra?: unknown) => Promise<string | undefined>;
+  input?: (q: string, placeholder?: string, extra?: unknown) => Promise<string | undefined>;
+  confirm?: (q: string, msg: string, extra?: unknown) => Promise<boolean>;
+  editor?: (q: string, prefill?: string, extra?: unknown) => Promise<string | undefined>;
 }
 
-const pristineUiMap = new WeakMap<object, PristineUiOriginals>();
+const PRISTINE_UI_KEY = "__pi_dashboard_pristine_ui__";
 
-export function getOrCreatePristineOriginals(ui: any): PristineUiOriginals {
-  if (!ui || typeof ui !== 'object') {
+interface PromptBusTagged {
+  __isPromptBusWrapper?: boolean;
+}
+
+export function getOrCreatePristineOriginals(ui: unknown): PristineUiOriginals {
+  if (!ui || typeof ui !== "object") {
     return {};
   }
 
-  const existing = pristineUiMap.get(ui);
+  const proc = process as unknown as Record<PropertyKey, WeakMap<object, PristineUiOriginals> | undefined>;
+  const map = proc[PRISTINE_UI_KEY] ?? (proc[PRISTINE_UI_KEY] = new WeakMap<object, PristineUiOriginals>());
+  const existing = map.get(ui);
   if (existing) {
     return existing;
   }
 
-  // Dev warning if ui method is already wrapped
-  const keys: (keyof PristineUiOriginals)[] = ['notify', 'select', 'input', 'confirm', 'editor'];
+  const record = ui as Record<string, unknown>;
+  const keys: (keyof PristineUiOriginals)[] = ["notify", "select", "input", "confirm", "editor"];
   for (const key of keys) {
-    if (typeof ui[key] === 'function' && (ui[key] as any).__isPromptBusWrapper) {
-      console.warn('[bridge] getOrCreatePristineOriginals: captured an already-wrapped ui method');
+    const fn = record[key];
+    if (typeof fn === "function" && (fn as PromptBusTagged).__isPromptBusWrapper) {
+      console.warn("[bridge] getOrCreatePristineOriginals: captured an already-wrapped ui method");
       break;
     }
   }
 
   const captured: PristineUiOriginals = {
-    notify: typeof ui.notify === 'function' ? ui.notify.bind(ui) : undefined,
-    select: typeof ui.select === 'function' ? ui.select.bind(ui) : undefined,
-    input: typeof ui.input === 'function' ? ui.input.bind(ui) : undefined,
-    confirm: typeof ui.confirm === 'function' ? ui.confirm.bind(ui) : undefined,
-    editor: typeof ui.editor === 'function' ? ui.editor.bind(ui) : undefined,
+    notify: typeof record.notify === "function" ? (record.notify as PristineUiOriginals["notify"])!.bind(ui) : undefined,
+    select: typeof record.select === "function" ? (record.select as PristineUiOriginals["select"])!.bind(ui) : undefined,
+    input: typeof record.input === "function" ? (record.input as PristineUiOriginals["input"])!.bind(ui) : undefined,
+    confirm: typeof record.confirm === "function" ? (record.confirm as PristineUiOriginals["confirm"])!.bind(ui) : undefined,
+    editor: typeof record.editor === "function" ? (record.editor as PristineUiOriginals["editor"])!.bind(ui) : undefined,
   };
 
-  pristineUiMap.set(ui, captured);
+  map.set(ui, captured);
   return captured;
 }
