@@ -67,6 +67,9 @@ function makeApp(
   registerFileRoutes(app, {
     sessionManager: {
       listAll: () => cwds.map((cwd) => ({ cwd })),
+      addProvenancePath: () => {},
+      getProvenancePathsForSession: () => new Set(),
+      getProvenancePathsForCwd: () => new Set(),
     } as any,
     preferencesStore: { getPinnedDirectories: () => [] } as any,
     networkGuard: async () => undefined,

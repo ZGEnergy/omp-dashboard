@@ -18,7 +18,12 @@ import { resetArtifactRootsCache } from "../lib/artifact-roots.js";
 function makeApp(cwds: string[]): FastifyInstance {
   const app = Fastify({ logger: false });
   registerFileRoutes(app, {
-    sessionManager: { listAll: () => cwds.map((cwd) => ({ cwd })) } as any,
+    sessionManager: {
+      listAll: () => cwds.map((cwd) => ({ cwd })),
+      addProvenancePath: () => {},
+      getProvenancePathsForSession: () => new Set(),
+      getProvenancePathsForCwd: () => new Set(),
+    } as any,
     preferencesStore: { getPinnedDirectories: () => [] } as any,
     networkGuard: async () => undefined,
   });
