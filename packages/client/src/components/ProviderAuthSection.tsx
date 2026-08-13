@@ -422,7 +422,6 @@ function ApiKeyRow({ provider, onChanged, showToast }: { provider: ProviderAuthS
             onChange={(e) => setKeyValue(e.target.value)}
             placeholder={i18nT("gateway.pasteApiKey", undefined, "Paste API key…")}
             className="flex-1 px-2 py-1 text-xs rounded bg-[var(--bg-secondary)] border border-[var(--border-secondary)] text-[var(--text-primary)] placeholder-[var(--text-muted)] font-mono"
-            onKeyDown={(e) => { if (e.key === "Enter") handleSave(); }}
             autoFocus
             autoComplete="off"
             autoCorrect="off"
@@ -430,7 +429,7 @@ function ApiKeyRow({ provider, onChanged, showToast }: { provider: ProviderAuthS
             spellCheck={false}
             data-lpignore="true"
           />
-          <button type="submit" onClick={handleSave} disabled={busy || !keyValue.trim()} className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50">
+          <button type="submit" disabled={busy || !keyValue.trim()} className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50">
             <Icon path={mdiContentSave} size={0.5} />
             {i18nT("common.save2", undefined, "Save")}
           </button>

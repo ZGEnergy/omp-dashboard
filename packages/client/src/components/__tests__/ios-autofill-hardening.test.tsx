@@ -65,6 +65,38 @@ describe("iOS Autofill Hardening Tests (#112)", () => {
       form?.dispatchEvent(event);
       expect(preventDefaultSpy).toHaveBeenCalled();
     });
+
+    it("fires fetch PUT only once when submit button is clicked", async () => {
+      const fetchSpy = vi.fn().mockImplementation((url: string) => {
+        if (url.includes("/api/provider-auth/status")) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve([{ id: "openai", name: "OpenAI", flowType: "api_key", authenticated: false }]),
+          });
+        }
+        if (url.includes("/api/provider-auth/handlers")) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ ids: ["openai"] }) });
+        }
+        if (url.includes("/api/provider-auth/api-key")) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+        }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+      });
+      vi.stubGlobal("fetch", fetchSpy);
+
+      render(<ProviderAuthSection />);
+      const addKeyBtn = await screen.findByRole("button", { name: /Add Key/i });
+      fireEvent.click(addKeyBtn);
+
+      const input = screen.getByPlaceholderText(/Paste API key/i);
+      fireEvent.change(input, { target: { value: "sk-test-123" } });
+
+      const saveBtn = screen.getByRole("button", { name: /Save/i });
+      fireEvent.click(saveBtn);
+
+      const apiKeyCalls = fetchSpy.mock.calls.filter(([url]) => (url as string).includes("/api/provider-auth/api-key"));
+      expect(apiKeyCalls).toHaveLength(1);
+    });
   });
 
   describe("GatewaySetupGuide", () => {
