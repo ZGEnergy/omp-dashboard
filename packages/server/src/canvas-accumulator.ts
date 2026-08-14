@@ -16,10 +16,12 @@
  *   - `agent_end`  → settle (`selectCanvasTarget` over the buffer) then reset.
  *   - turn start / abort / termination → reset with NO settle (S11): an
  *     aborted turn's candidates must not leak into a later write-less turn.
- *
  * See change: auto-canvas.
  */
 
+import fs from "node:fs";
+import path from "node:path";
+import { safeRealpathSync } from "./resolve-path.js";
 import {
   type CanvasDeclareInput,
   type CanvasMode,
@@ -36,7 +38,7 @@ import type { ViewTarget } from "@blackbelt-technology/pi-dashboard-shared/types
 /** Minimal forwarded-event shape the accumulator reads. */
 export interface CanvasForwardedEvent {
   eventType: string;
-  data?: { toolName?: unknown; args?: unknown };
+  data?: { toolName?: unknown; args?: unknown; isError?: boolean };
 }
 
 export interface CanvasAccumulatorDeps {
@@ -61,6 +63,8 @@ export interface CanvasAccumulatorDeps {
    * non-actionable. `port` echoes the expired chip.
    */
   broadcastServerChipExpire: (sessionId: string, port: number) => void;
+  /** Record session provenance path for out-of-cwd file access containment. */
+  recordProvenancePath?: (sessionId: string, absPath: string) => void;
 }
 
 export interface CanvasAccumulator {
@@ -115,16 +119,44 @@ export function createCanvasAccumulator(
     }
   }
 
-  function onToolStart(sessionId: string, event: CanvasForwardedEvent, cwd: string): void {
+  function recordProvenance(sessionId: string, rawPath: string, cwd: string): void {
+    if (!rawPath) return;
+    if (rawPath.split(/[\\/]/).some((seg) => seg === "..")) return;
+    const absPath = path.resolve(cwd, rawPath);
+    try {
+      const stat = fs.statSync(absPath);
+      if (stat.isDirectory()) return;
+    } catch {
+      return;
+    }
+    const realPath = safeRealpathSync(absPath);
+    deps.recordProvenancePath?.(sessionId, realPath);
+  }
+
+  function onToolEnd(sessionId: string, event: CanvasForwardedEvent, cwd: string): void {
+    if (event.data?.isError === true) return;
     const toolName = typeof event.data?.toolName === "string" ? event.data.toolName : "";
     if (!toolName) return;
     const args = event.data?.args as Record<string, unknown> | undefined;
 
+    const toolLower = toolName.toLowerCase();
+    if (toolLower === "write" || toolLower === "edit" || toolLower === "ast_edit") {
+      if (typeof args?.path === "string") {
+        recordProvenance(sessionId, args.path, cwd);
+      }
+    }
+  }
+
+  function onToolStart(sessionId: string, event: CanvasForwardedEvent, cwd: string): void {
+    const toolName = typeof event.data?.toolName === "string" ? event.data.toolName : "";
+    if (!toolName) return;
+    const args = event.data?.args as Record<string, unknown> | undefined;
+    const toolLower = toolName.toLowerCase();
     // `canvas()` declare-tool: normalized here with the session cwd; bypasses
     // the type registry (Decision 5/6). Server target → chip path (Decision 4);
     // NO probe/fetch (S29). A bad shape is ignored (the bridge already returned
     // the error ack).
-    if (toolName.toLowerCase() === "canvas") {
+    if (toolLower === "canvas") {
       // `normalizeCanvasDeclare` re-validates the raw shape (cwd-free) before
       // trusting any field, so an untyped args object is safe to pass.
       const result = normalizeCanvasDeclare(args as CanvasDeclareInput | undefined, cwd);
@@ -170,6 +202,8 @@ export function createCanvasAccumulator(
       if (event.eventType === "queue_state") return;
       if (event.eventType === "tool_execution_start") {
         onToolStart(sessionId, event, ctx.cwd);
+      } else if (event.eventType === "tool_execution_end") {
+        onToolEnd(sessionId, event, ctx.cwd);
       } else if (event.eventType === "agent_end") {
         onAgentEnd(sessionId);
       } else if (event.eventType === "agent_start") {

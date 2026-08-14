@@ -2,7 +2,9 @@
  * Pure in-memory session registry.
  * Replaces SQLite-backed session-manager.ts.
  */
+import fs from "node:fs";
 import type { DashboardSession, SessionSource, SessionStatus } from "@blackbelt-technology/pi-dashboard-shared/types.js";
+import { safeRealpathSync } from "./resolve-path.js";
 
 export interface RegisterSessionParams {
   id: string;
@@ -69,6 +71,16 @@ export interface SessionManager {
   get(sessionId: string): DashboardSession | undefined;
   listActive(): DashboardSession[];
   listAll(): DashboardSession[];
+  addProvenancePath(sessionId: string, absPath: string): void;
+  getProvenancePathsForSession(sessionId: string): Set<string>;
+  /**
+   * Aggregates provenance paths across all sessions sharing the same `cwd`.
+   * Used by file routes when `sessionId` is omitted from the request query.
+   * Containment safety is guaranteed by exact realpath equality matching in `isAllowed`
+   * (NOT `within()` subtree containment), preventing an exact provenance path from
+   * widening access to a directory tree.
+   */
+  getProvenancePathsForCwd(cwd: string): Set<string>;
   /** Called after any mutation (register, unregister, update). Receives the affected session ID and optional context. */
   onChange?: (sessionId: string, ctx?: OnChangeContext) => void;
   /** Called after a session is unregistered (status set to ended). */
@@ -100,10 +112,12 @@ export function createMemorySessionManager(): SessionManager {
           // Preserve context usage until bridge sends fresh data
           contextTokens: existing.contextTokens,
           contextWindow: existing.contextWindow,
+          provenancePaths: existing?.provenancePaths ?? new Set<string>(),
         } : {
           tokensIn: 0,
           tokensOut: 0,
           cost: 0,
+          provenancePaths: new Set<string>(),
         }),
         // Apply registration params (always override)
         id: params.id,
@@ -147,6 +161,9 @@ export function createMemorySessionManager(): SessionManager {
     },
 
     restore(session: DashboardSession): void {
+      if (session.provenancePaths && !(session.provenancePaths instanceof Set)) {
+        session.provenancePaths = new Set(session.provenancePaths);
+      }
       sessions.set(session.id, session);
     },
 
@@ -178,6 +195,38 @@ export function createMemorySessionManager(): SessionManager {
 
     listAll(): DashboardSession[] {
       return Array.from(sessions.values());
+    },
+    addProvenancePath(sessionId: string, absPath: string): void {
+      const session = sessions.get(sessionId);
+      if (!session) return;
+      try {
+        const stat = fs.statSync(absPath);
+        if (stat.isDirectory()) return;
+      } catch {
+        return;
+      }
+      if (!session.provenancePaths) {
+        session.provenancePaths = new Set<string>();
+      }
+      session.provenancePaths.add(safeRealpathSync(absPath));
+    },
+
+    getProvenancePathsForSession(sessionId: string): Set<string> {
+      const session = sessions.get(sessionId);
+      if (!session || !session.provenancePaths) return new Set<string>();
+      return new Set(session.provenancePaths);
+    },
+
+    getProvenancePathsForCwd(cwd: string): Set<string> {
+      const result = new Set<string>();
+      for (const session of sessions.values()) {
+        if (session.cwd === cwd && session.provenancePaths) {
+          for (const p of session.provenancePaths) {
+            result.add(p);
+          }
+        }
+      }
+      return result;
     },
   };
 

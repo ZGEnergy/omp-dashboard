@@ -56,6 +56,9 @@ function makeStubSessionManager(sessions: DashboardSession[]): SessionManager {
     get: (id) => map.get(id),
     listActive: () => Array.from(map.values()).filter((s) => s.status !== "ended"),
     listAll: () => Array.from(map.values()),
+    addProvenancePath: () => { /* unused */ },
+    getProvenancePathsForSession: () => new Set(),
+    getProvenancePathsForCwd: () => new Set(),
   };
 }
 

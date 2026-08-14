@@ -121,6 +121,11 @@ export interface DashboardSession {
    */
   piVersion?: string;
   /**
+   * Resolved absolute paths created, edited, or declared by this session that
+   * reside outside the session `cwd`. Used for session-scoped path containment.
+   */
+  provenancePaths?: Set<string>;
+  /**
    * Per-session git-worktree identity. Set only when the session's cwd
    * is a git worktree (not the main checkout). See `GitWorktreeInfo`.
    * Absent on older bridges and for plain checkouts. Clients should read

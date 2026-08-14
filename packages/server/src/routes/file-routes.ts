@@ -173,17 +173,30 @@ function getAsciidoctor(): any {
 // `/api/file/raw` (known session + `isAllowed` against the cwd anchor), factored
 // so both new routes CALL it rather than re-implementing the containment logic
 // (design D5). Returns the resolved abs path or a {code,error} reply mapping.
+function getProvenance(
+  sessionManager: SessionManager,
+  cwd: string,
+  sessionId?: string,
+): Set<string> {
+  if (sessionId) {
+    return sessionManager.getProvenancePathsForSession(sessionId);
+  }
+  return sessionManager.getProvenancePathsForCwd(cwd);
+}
+
 async function gateFilePath(
   cwd: string | undefined,
   relPath: string | undefined,
   sessionManager: SessionManager,
+  sessionId?: string,
 ): Promise<{ resolved: string } | { code: number; error: string }> {
   if (!cwd || !relPath) return { code: 400, error: "cwd and path parameters required" };
   if (!sessionManager.listAll().some((s) => s.cwd === cwd)) {
     return { code: 403, error: "unknown session path" };
   }
   const resolved = path.resolve(cwd, relPath);
-  if (!(await isAllowed(resolved, { anchors: [cwd] }))) {
+  const provenancePaths = getProvenance(sessionManager, cwd, sessionId);
+  if (!(await isAllowed(resolved, { anchors: [cwd], provenancePaths }))) {
     return { code: 403, error: "path outside working directory" };
   }
   return { resolved };
@@ -216,6 +229,7 @@ export function registerFileRoutes(
     relPath: string | undefined,
     allowedExts: string[],
     sizeCap: number,
+    sessionId?: string,
   ): Promise<
     | { resolved: string; ext: string; stat: import("node:fs").Stats }
     | { code: number; error: string }
@@ -227,7 +241,8 @@ export function registerFileRoutes(
       return { code: 403, error: "unknown session path" };
     }
     const resolved = path.resolve(cwd, relPath);
-    if (!(await isAllowed(resolved, { anchors: [cwd] }))) {
+    const provenancePaths = getProvenance(sessionManager, cwd, sessionId);
+    if (!(await isAllowed(resolved, { anchors: [cwd], provenancePaths }))) {
       return { code: 403, error: "path outside working directory" };
     }
     let stat: import("node:fs").Stats;
@@ -308,12 +323,13 @@ export function registerFileRoutes(
   );
 
   // File read endpoint — read file content or list directory
-  fastify.get<{ Querystring: { cwd?: string; path?: string } }>(
+  fastify.get<{ Querystring: { cwd?: string; path?: string; sessionId?: string } }>(
     "/api/file",
     { preHandler: networkGuard },
     async (request, reply) => {
       const cwd = request.query.cwd;
       const relPath = request.query.path ? decodeFileUri(request.query.path) : request.query.path;
+      const sessionId = request.query.sessionId;
       if (!cwd || !relPath) {
         reply.code(400);
         return { success: false, error: "cwd and path parameters required" } satisfies ApiResponse;
@@ -326,9 +342,10 @@ export function registerFileRoutes(
       }
 
       const resolved = path.resolve(cwd, relPath);
+      const provenancePaths = getProvenance(sessionManager, cwd, sessionId);
       // Anchors include the fixed `~/.pi` allowlist so a resolved `~/.pi/…`
       // mention (from `/api/file/resolve-mention`) previews without a 403 (D7).
-      if (!(await isAllowed(resolved, { anchors: [cwd, homePiAnchor()] }))) {
+      if (!(await isAllowed(resolved, { anchors: [cwd, homePiAnchor()], provenancePaths }))) {
         reply.code(403);
         return { success: false, error: "path outside working directory" } satisfies ApiResponse;
       }
@@ -386,12 +403,13 @@ export function registerFileRoutes(
   // `/api/file`(names)+`/api/browse`(dirs, hidden-stripped) merge that
   // mislabelled hidden directories (`.git`, `.pi`) as files.
   // See change: improve-content-editor.
-  fastify.get<{ Querystring: { cwd?: string; path?: string } }>(
+  fastify.get<{ Querystring: { cwd?: string; path?: string; sessionId?: string } }>(
     "/api/file/tree",
     { preHandler: networkGuard },
     async (request, reply) => {
       const cwd = request.query.cwd;
       const relPath = request.query.path ? decodeFileUri(request.query.path) : request.query.path;
+      const sessionId = request.query.sessionId;
       if (!cwd || !relPath) {
         reply.code(400);
         return { success: false, error: "cwd and path parameters required" } satisfies ApiResponse;
@@ -403,7 +421,8 @@ export function registerFileRoutes(
       }
 
       const resolved = path.resolve(cwd, relPath);
-      if (!(await isAllowed(resolved, { anchors: [cwd] }))) {
+      const provenancePaths = getProvenance(sessionManager, cwd, sessionId);
+      if (!(await isAllowed(resolved, { anchors: [cwd], provenancePaths }))) {
         reply.code(403);
         return { success: false, error: "path outside working directory" } satisfies ApiResponse;
       }
@@ -545,12 +564,13 @@ export function registerFileRoutes(
   // detect orphan-path collisions before submit. Gated on `cwd` being a
   // known session or pinned directory to avoid arbitrary filesystem
   // probes from an authenticated browser.
-  fastify.get<{ Querystring: { cwd?: string; path?: string } }>(
+  fastify.get<{ Querystring: { cwd?: string; path?: string; sessionId?: string } }>(
     "/api/file/exists",
     { preHandler: networkGuard },
     async (request, reply) => {
       const cwd = request.query.cwd;
       const probePath = request.query.path;
+      const sessionId = request.query.sessionId;
       if (!cwd || !probePath) {
         reply.code(400);
         return { success: false, error: "cwd and path parameters required" } satisfies ApiResponse;
@@ -574,7 +594,8 @@ export function registerFileRoutes(
       }
       const resolved = path.resolve(probePath);
       const anchors = [cwd, ...preferencesStore.getPinnedDirectories()];
-      if (!(await isAllowed(resolved, { anchors }))) {
+      const provenancePaths = getProvenance(sessionManager, cwd, sessionId);
+      if (!(await isAllowed(resolved, { anchors, provenancePaths }))) {
         reply.code(403);
         return { success: false, error: "path outside cwd" } satisfies ApiResponse;
       }
@@ -597,13 +618,14 @@ export function registerFileRoutes(
   // resolution. `resolveFileMention` then expands `~/`, runs containment
   // (cwd + git-root + `~/.pi`) BEFORE `fs.stat`, and returns null for a
   // non-existent in-scope mention (never an error).
-  fastify.post<{ Body: { cwd?: unknown; mention?: unknown } }>(
+  fastify.post<{ Body: { cwd?: unknown; mention?: unknown; sessionId?: unknown } }>(
     "/api/file/resolve-mention",
     { preHandler: networkGuard },
     async (request, reply) => {
       const body = request.body ?? {};
       const cwd = typeof body.cwd === "string" ? body.cwd : "";
       const mention = typeof body.mention === "string" ? body.mention : "";
+      const sessionId = typeof body.sessionId === "string" ? body.sessionId : undefined;
       if (!cwd || !mention) {
         reply.code(400);
         return { success: false, error: "cwd and mention are required" } satisfies ApiResponse;
@@ -612,7 +634,8 @@ export function registerFileRoutes(
         reply.code(403);
         return { success: false, error: "unknown session path" } satisfies ApiResponse;
       }
-      const result = await resolveFileMention(mention, { cwd });
+      const provenancePaths = getProvenance(sessionManager, cwd, sessionId);
+      const result = await resolveFileMention(mention, { cwd, provenancePaths });
       return {
         success: true,
         data: result ? { resolved: result.resolved, kind: result.kind } : { resolved: null },
@@ -636,12 +659,13 @@ export function registerFileRoutes(
   // HTTP Range so `<video>` seek works. Same cwd-allowlist + anti-traversal
   // gate as `/api/file`. Sets `Content-Disposition: inline` and a short
   // private cache.
-  fastify.get<{ Querystring: { cwd?: string; path?: string } }>(
+  fastify.get<{ Querystring: { cwd?: string; path?: string; sessionId?: string } }>(
     "/api/file/raw",
     { preHandler: networkGuard },
     async (request, reply) => {
       const cwd = request.query.cwd;
       const relPath = request.query.path;
+      const sessionId = request.query.sessionId;
       if (!cwd || !relPath) {
         reply.code(400);
         return { success: false, error: "cwd and path parameters required" } satisfies ApiResponse;
@@ -654,12 +678,13 @@ export function registerFileRoutes(
       }
 
       const resolved = path.resolve(cwd, relPath);
+      const provenancePaths = getProvenance(sessionManager, cwd, sessionId);
       // Layers ①/② (cwd + git common root) serve any type. Layer ③ — artifact
       // roots — is image-only and real-path contained; it covers agent
       // screenshots that live outside every cwd and git root.
       // See change: serve-agent-artifact-previews.
       if (
-        !(await isAllowed(resolved, { anchors: [cwd, homePiAnchor()] })) &&
+        !(await isAllowed(resolved, { anchors: [cwd, homePiAnchor()], provenancePaths })) &&
         !(await isImageUnderArtifactRoot(resolved))
       ) {
         reply.code(403);
@@ -745,7 +770,7 @@ export function registerFileRoutes(
   // engine-only PDF render (`{mode:"pdf"}`; no in-process fallback — engine
   // absent → {success:false}; change: render-pptx-preview). Non-supported
   // extensions → 400. Same anti-traversal gate as `/api/file/raw`.
-  fastify.get<{ Querystring: { cwd?: string; path?: string } }>(
+  fastify.get<{ Querystring: { cwd?: string; path?: string; sessionId?: string } }>(
     "/api/file/render",
     { preHandler: networkGuard },
     async (request, reply) => {
@@ -814,7 +839,8 @@ export function registerFileRoutes(
       }
 
       const resolved = path.resolve(cwd, relPath);
-      if (!(await isAllowed(resolved, { anchors: [cwd, homePiAnchor()] }))) {
+      const provenancePaths = getProvenance(sessionManager, cwd, request.query.sessionId);
+      if (!(await isAllowed(resolved, { anchors: [cwd, homePiAnchor()], provenancePaths }))) {
         reply.code(403);
         return { success: false, error: "path outside working directory" } satisfies ApiResponse;
       }

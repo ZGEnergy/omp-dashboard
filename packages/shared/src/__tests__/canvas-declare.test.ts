@@ -31,13 +31,19 @@ describe("normalizeCanvasDeclare", () => {
       "/p",
     );
     expect(r.ok).toBe(false);
-    if (r.ok === false) expect(r.error).toMatch(/absolute|\.\./i);
+    if (r.ok === false) expect(r.error).toMatch(/\.\./i);
   });
 
-  it("S14b — an absolute path is rejected too", () => {
-    expect(
-      normalizeCanvasDeclare({ target: { kind: "file", path: "/etc/passwd" } }, "/p").ok,
-    ).toBe(false);
+  it("S14b — permits an absolute path", () => {
+    const r = normalizeCanvasDeclare({ target: { kind: "file", path: "/tmp/report.md" } }, "/p");
+    expect(r).toMatchObject({
+      ok: true,
+      candidate: {
+        prio: "DECLARE",
+        target: { kind: "file", cwd: "/p", path: "/tmp/report.md" },
+        kind: "markdown",
+      },
+    });
   });
 
   it("S15 — a server target routes to a chip, bypassing selection (NOT a ViewTarget)", () => {
@@ -81,6 +87,9 @@ describe("validateCanvasDeclareShape (cwd-free ack)", () => {
   });
   it("rejects traversal without needing a cwd", () => {
     expect(validateCanvasDeclareShape({ target: { kind: "file", path: "../x" } })).not.toBeNull();
+  });
+  it("accepts an absolute file path", () => {
+    expect(validateCanvasDeclareShape({ target: { kind: "file", path: "/tmp/report.md" } })).toBeNull();
   });
   it("rejects a bad port", () => {
     expect(validateCanvasDeclareShape({ target: { kind: "server", port: 0 } })).not.toBeNull();

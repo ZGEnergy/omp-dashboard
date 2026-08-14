@@ -535,6 +535,9 @@ export function wireEvents(deps: EventWiringDeps): void {
         expire: true,
       });
     },
+    recordProvenancePath: (sessionId, absPath) => {
+      sessionManager.addProvenancePath(sessionId, absPath);
+    },
   });
   // Debounce flows refresh to prevent infinite loop between sessions in same cwd
   const recentFlowsRefresh = new Set<string>();

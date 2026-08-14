@@ -101,6 +101,9 @@ function makeSessionMgr(sessions: DashboardSession[] = []): SessionManager {
     get: (id: string) => map.get(id),
     listActive: () => Array.from(map.values()).filter(s => s.status !== "ended"),
     listAll: () => Array.from(map.values()),
+    addProvenancePath: vi.fn(),
+    getProvenancePathsForSession: () => new Set(),
+    getProvenancePathsForCwd: () => new Set(),
   };
 }
 

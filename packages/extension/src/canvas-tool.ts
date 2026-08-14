@@ -31,8 +31,8 @@ export function registerCanvasTool(pi: ExtensionAPI): void {
     promptSnippet:
       "Point the dashboard canvas at a deliverable you're producing (file, url, or a running dev server)",
     promptGuidelines: [
-      "Call canvas() when you produce or update a user-facing deliverable — a report/doc/mockup/image (target.kind='file', path relative to the session cwd), a web page (target.kind='url'), or a dev server you started (target.kind='server', port).",
-      "Paths MUST be relative to the session cwd — never absolute and never containing '..'.",
+      "Call canvas() when you produce or update a user-facing deliverable — a report/doc/mockup/image (target.kind='file', path relative to the session cwd or absolute file path), a web page (target.kind='url'), or a dev server you started (target.kind='server', port).",
+      "Paths can be relative to the session cwd or absolute — never containing '..'.",
       "This is fire-and-forget: it returns immediately and never blocks. Keep working after calling it.",
       "Use mode='pin' to keep the canvas on this artifact across later writes; default 'replace' lets the newest artifact take the slot.",
     ],
@@ -48,13 +48,13 @@ export function registerCanvasTool(pi: ExtensionAPI): void {
               [Type.Literal("file"), Type.Literal("url"), Type.Literal("server")],
               {
                 description:
-                  "'file' = a file relative to the session cwd (needs path); 'url' = a web page (needs url); 'server' = a running dev server (needs port).",
+                  "'file' = a file relative to the session cwd or absolute (needs path); 'url' = a web page (needs url); 'server' = a running dev server (needs port).",
               },
             ),
             path: Type.Optional(
               Type.String({
                 description:
-                  "Required for kind='file'. Relative to the session cwd — no absolute paths, no '..'.",
+                  "Required for kind='file'. Relative to the session cwd or absolute — no '..'.",
               }),
             ),
             url: Type.Optional(

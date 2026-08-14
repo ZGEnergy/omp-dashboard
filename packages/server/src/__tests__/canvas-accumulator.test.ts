@@ -7,6 +7,9 @@
  * (last declare wins), S21 (settings read-fresh, no cache).
  */
 
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   type CanvasTypes,
   DEFAULT_CANVAS_TYPES,
@@ -183,5 +186,52 @@ describe("canvas accumulator", () => {
     h.acc.onEvent("s1", AGENT_END, live);
     const settle = h.intents.filter((i) => i.phase === "settle");
     expect(settle[0].target).toEqual({ kind: "file", cwd: CWD, path: "report.md" });
+  });
+  it("records session provenance paths on tool_execution_end for existing files only", () => {
+    const recorded: Array<{ sessionId: string; path: string }> = [];
+    const acc = createCanvasAccumulator({
+      readCanvasTypes: () => DEFAULT_CANVAS_TYPES,
+      broadcastIntent: () => {},
+      broadcastServerChip: () => {},
+      broadcastServerChipExpire: () => {},
+      recordProvenancePath: (sessionId, path) => recorded.push({ sessionId, path }),
+    });
+
+    const tmpFile = path.join(os.tmpdir(), `prov-test-${Date.now()}.txt`);
+    fs.writeFileSync(tmpFile, "test content");
+
+    try {
+      // tool_execution_start MUST NOT record provenance
+      acc.onEvent("s1", { eventType: "tool_execution_start", data: { toolName: "write", args: { path: tmpFile } } }, live);
+      expect(recorded).toHaveLength(0);
+
+      // Failed tool_execution_end MUST NOT record provenance
+      acc.onEvent("s1", { eventType: "tool_execution_end", data: { toolName: "write", args: { path: tmpFile }, isError: true } }, live);
+      expect(recorded).toHaveLength(0);
+
+      // canvas() declare tool_execution_end MUST NOT record provenance
+      acc.onEvent("s1", { eventType: "tool_execution_end", data: { toolName: "canvas", args: { target: { kind: "file", path: "/etc/passwd" } } } }, live);
+      expect(recorded).toHaveLength(0);
+
+      // Non-existent file tool_execution_end MUST NOT record provenance
+      acc.onEvent("s1", { eventType: "tool_execution_end", data: { toolName: "write", args: { path: "/non/existent/file.txt" } } }, live);
+      expect(recorded).toHaveLength(0);
+
+      // Directory path tool_execution_end MUST NOT record provenance
+      acc.onEvent("s1", { eventType: "tool_execution_end", data: { toolName: "write", args: { path: os.tmpdir() } } }, live);
+      expect(recorded).toHaveLength(0);
+
+      // Traversal attempt MUST NOT record provenance
+      acc.onEvent("s1", { eventType: "tool_execution_end", data: { toolName: "write", args: { path: "../etc/passwd" } } }, live);
+      expect(recorded).toHaveLength(0);
+
+      // Successful tool_execution_end for existing file DOES record provenance
+      acc.onEvent("s1", { eventType: "tool_execution_end", data: { toolName: "write", args: { path: tmpFile } } }, live);
+      expect(recorded).toEqual([
+        { sessionId: "s1", path: fs.realpathSync(tmpFile) },
+      ]);
+    } finally {
+      if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
+    }
   });
 });
