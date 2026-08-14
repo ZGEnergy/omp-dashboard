@@ -243,6 +243,18 @@ export class PromptBus {
     entry.resolve(response);
   }
 
+  
+  /** True when the pending prompt has a dashboard component claim — meaning a
+   *  non-TUI adapter returned a component for it. Used by the TUI adapter to
+   *  avoid auto-cancelling a prompt when the dashboard is rendering it and the
+   *  native ui method returned undefined as a no-op rather than a genuine user
+   *  cancel.
+   *
+   *  Returns false if the prompt is not pending (already resolved or unknown). */
+  hasComponentClaim(id: string): boolean {
+    const entry = this.pending.get(id);
+    return entry ? entry.resolvedComponent !== undefined : false;
+  }
   /**
    * Cancel a pending prompt (e.g. on timeout or abort).
    */

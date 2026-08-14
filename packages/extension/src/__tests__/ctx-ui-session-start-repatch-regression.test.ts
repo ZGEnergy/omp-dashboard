@@ -32,20 +32,40 @@ describe("ctx.ui session_start re-patch & error handling regression (#115)", () 
     expect(patchedSelect).not.toHaveBeenCalled();
   });
 
-  it("warns when capturing an un-cached ui object with an already-wrapped method", () => {
+  it("never stores an already-wrapped method (no pristine stash) as an original; TUI arm disabled for it (#136)", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const wrappedSelect = vi.fn();
     (wrappedSelect as any).__isPromptBusWrapper = true;
     const uiWithWrapped = { select: wrappedSelect };
 
-    getOrCreatePristineOriginals(uiWithWrapped);
+    const orig = getOrCreatePristineOriginals(uiWithWrapped);
 
+    // Wrapper must never become the "original" — that stored wrapper is the
+    // infinite-recursion bug (#136). With no pristine stash it degrades.
+    expect(orig.select).toBeUndefined();
     expect(warnSpy).toHaveBeenCalledWith(
-      "[bridge] getOrCreatePristineOriginals: captured an already-wrapped ui method"
+      "[bridge] getOrCreatePristineOriginals: ui.select already-wrapped with no pristine original — TUI arm disabled for it",
     );
     warnSpy.mockRestore();
   });
 
+  it("recovers the true native from an already-wrapped method via __pristineOriginal stash (#136)", async () => {
+    const nativeSelect = vi.fn().mockResolvedValue("option1");
+    // Simulates a wrapper installed by a previous bridge incarnation: tagged,
+    // carrying its bound pristine native, and NOT in the process WeakMap cache
+    // (the isolated-vm-context cache-miss path that #136 crashes on).
+    const wrappedSelect = vi.fn();
+    (wrappedSelect as any).__isPromptBusWrapper = true;
+    (wrappedSelect as any).__pristineOriginal = nativeSelect;
+    const uiWithWrapped = { select: wrappedSelect };
+
+    const orig = getOrCreatePristineOriginals(uiWithWrapped);
+
+    expect(orig.select).toBeDefined();
+    await orig.select!("q", ["a"]);
+    expect(nativeSelect).toHaveBeenCalledWith("q", ["a"]);
+    expect(wrappedSelect).not.toHaveBeenCalled();
+  });
   it("survives module reload without recapturing wrappers (jiti)", async () => {
     const nativeSelect = vi.fn().mockResolvedValue("option1");
     const mockUi = {
