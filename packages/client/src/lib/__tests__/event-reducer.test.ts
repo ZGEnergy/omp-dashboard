@@ -3354,3 +3354,188 @@ describe("advisor message_end rows", () => {
     expect(unrelated.messages).toHaveLength(0);
   });
 });
+describe("issue #126: live thinking flush on mid-turn tool execution", () => {
+  it("flushes streamingThinking into a thinking row when tool_execution_start occurs", () => {
+    let state = createInitialState();
+    const t0 = 1000;
+
+    state = reduceEvent(
+      state,
+      {
+        eventType: "message_update",
+        timestamp: t0,
+        data: { assistantMessageEvent: { type: "thinking_start" } },
+      },
+      { isLive: true },
+    );
+    state = reduceEvent(
+      state,
+      {
+        eventType: "message_update",
+        timestamp: t0 + 10,
+        data: { assistantMessageEvent: { type: "thinking_delta", delta: "Analyzing code..." } },
+      },
+      { isLive: true },
+    );
+
+    expect(state.streamingThinking).toBe("Analyzing code...");
+    expect(state.messages).toHaveLength(0);
+
+    state = reduceEvent(
+      state,
+      {
+        eventType: "tool_execution_start",
+        timestamp: t0 + 20,
+        data: { toolCallId: "call_sub126", toolName: "agent" },
+      },
+      { isLive: true },
+    );
+
+    expect(state.streamingThinking).toBe("");
+    expect(state.thinkingStartedAt).toBeUndefined();
+
+    expect(state.messages).toHaveLength(2);
+    expect(state.messages[0]).toMatchObject({
+      role: "thinking",
+      content: "Analyzing code...",
+      streamedLive: true,
+      startedAt: t0,
+      duration: 20,
+    });
+    expect(state.messages[1]).toMatchObject({
+      role: "toolResult",
+      toolCallId: "call_sub126",
+      toolName: "agent",
+    });
+  });
+
+  it("does not create a duplicate thinking row when thinking_end fires after flush", () => {
+    let state = createInitialState();
+    const t0 = 1000;
+
+    state = reduceEvent(
+      state,
+      {
+        eventType: "message_update",
+        timestamp: t0,
+        data: { assistantMessageEvent: { type: "thinking_start" } },
+      },
+      { isLive: true },
+    );
+    state = reduceEvent(
+      state,
+      {
+        eventType: "message_update",
+        timestamp: t0 + 10,
+        data: { assistantMessageEvent: { type: "thinking_delta", delta: "Subagent prompt" } },
+      },
+      { isLive: true },
+    );
+    state = reduceEvent(
+      state,
+      {
+        eventType: "tool_execution_start",
+        timestamp: t0 + 20,
+        data: { toolCallId: "call_1", toolName: "task" },
+      },
+      { isLive: true },
+    );
+
+    expect(state.messages.filter((m) => m.role === "thinking")).toHaveLength(1);
+
+    state = reduceEvent(
+      state,
+      {
+        eventType: "message_update",
+        timestamp: t0 + 30,
+        data: { assistantMessageEvent: { type: "thinking_end" } },
+      },
+      { isLive: true },
+    );
+
+    expect(state.messages.filter((m) => m.role === "thinking")).toHaveLength(1);
+  });
+
+  it("flushes previous thinking block when a new thinking_start arrives before thinking_end", () => {
+    let state = createInitialState();
+    const t0 = 1000;
+
+    state = reduceEvent(
+      state,
+      {
+        eventType: "message_update",
+        timestamp: t0,
+        data: { assistantMessageEvent: { type: "thinking_start" } },
+      },
+      { isLive: true },
+    );
+    state = reduceEvent(
+      state,
+      {
+        eventType: "message_update",
+        timestamp: t0 + 10,
+        data: { assistantMessageEvent: { type: "thinking_delta", delta: "First block" } },
+      },
+      { isLive: true },
+    );
+
+    state = reduceEvent(
+      state,
+      {
+        eventType: "message_update",
+        timestamp: t0 + 50,
+        data: { assistantMessageEvent: { type: "thinking_start" } },
+      },
+      { isLive: true },
+    );
+
+    expect(state.messages).toHaveLength(1);
+    expect(state.messages[0]).toMatchObject({
+      role: "thinking",
+      content: "First block",
+    });
+    expect(state.streamingThinking).toBe("");
+    expect(state.thinkingStartedAt).toBe(t0 + 50);
+  });
+
+  it("respects isLive flag for streamedLive and isolates subagent state", () => {
+    let state = createInitialState();
+    const t0 = 1000;
+
+    state = reduceEvent(
+      state,
+      {
+        eventType: "message_update",
+        timestamp: t0,
+        data: { assistantMessageEvent: { type: "thinking_start" } },
+      },
+      { isLive: false },
+    );
+    state = reduceEvent(
+      state,
+      {
+        eventType: "message_update",
+        timestamp: t0 + 10,
+        data: { assistantMessageEvent: { type: "thinking_delta", delta: "Cold replay thinking" } },
+      },
+      { isLive: false },
+    );
+    state = reduceEvent(
+      state,
+      {
+        eventType: "tool_execution_start",
+        timestamp: t0 + 20,
+        data: { toolCallId: "call_sub", toolName: "agent" },
+      },
+      { isLive: false },
+    );
+
+    expect(state.messages[0]).toMatchObject({
+      role: "thinking",
+      content: "Cold replay thinking",
+      streamedLive: false,
+    });
+
+    expect(state.subagents.size).toBe(0);
+  });
+});
