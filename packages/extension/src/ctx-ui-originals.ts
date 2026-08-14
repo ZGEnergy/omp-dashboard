@@ -12,6 +12,12 @@
  * shared ctx.ui. A wrapper is never stored as an "original"; if a genuine
  * native cannot be unwrapped, that method is left undefined (the TUI arm
  * degrades to the dashboard adapter) instead of recursing infinitely.
+ *
+ * Cache entries are tagged `cleanCapture: true` at write time. Entries written
+ * by pre-#136 code (which stored wrappers as "originals") lack this tag, so a
+ * stale WeakMap entry from a long-running process that first deployed before
+ * this fix is re-detected and rebuilt on cache hit instead of returning a
+ * poisoned (wrapper-referencing) "original" — the #136b abort-cascade crash.
  */
 
 export interface PristineUiOriginals {
@@ -20,6 +26,13 @@ export interface PristineUiOriginals {
   input?: (q: string, placeholder?: string, extra?: unknown) => Promise<string | undefined>;
   confirm?: (q: string, msg: string, extra?: unknown) => Promise<boolean>;
   editor?: (q: string, prefill?: string, extra?: unknown) => Promise<string | undefined>;
+}
+
+interface PristineUiCacheEntry {
+  originals: PristineUiOriginals;
+  /** Set true whenever this process wrote the entry using wrapper-unwrapping
+   *  logic. Absent on entries written by pre-#136 code. */
+  cleanCapture?: true;
 }
 
 const PRISTINE_UI_KEY = "__pi_dashboard_pristine_ui__";
@@ -65,11 +78,11 @@ export function getOrCreatePristineOriginals(ui: unknown): PristineUiOriginals {
     return {};
   }
 
-  const proc = process as unknown as Record<string, WeakMap<object, PristineUiOriginals> | undefined>;
-  const map = proc[PRISTINE_UI_KEY] ?? (proc[PRISTINE_UI_KEY] = new WeakMap<object, PristineUiOriginals>());
+  const proc = process as unknown as Record<string, WeakMap<object, PristineUiCacheEntry> | undefined>;
+  const map = proc[PRISTINE_UI_KEY] ?? (proc[PRISTINE_UI_KEY] = new WeakMap<object, PristineUiCacheEntry>());
   const existing = map.get(ui);
-  if (existing) {
-    return existing;
+  if (existing?.cleanCapture === true) {
+    return existing.originals;
   }
 
   const record = ui as Record<string, unknown>;
@@ -98,7 +111,8 @@ export function getOrCreatePristineOriginals(ui: unknown): PristineUiOriginals {
     captured[key] = original.bind(ui);
   }
 
-  const result = captured as unknown as PristineUiOriginals;
-  map.set(ui, result);
-  return result;
+  const originals = captured as unknown as PristineUiOriginals;
+  const entry: PristineUiCacheEntry = { originals, cleanCapture: true };
+  map.set(ui, entry);
+  return originals;
 }
