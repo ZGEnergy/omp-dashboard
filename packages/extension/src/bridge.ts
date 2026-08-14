@@ -2327,15 +2327,23 @@ function initBridge(pi: ExtensionAPI) {
                 return;
               }
 
-              if (!ac.signal.aborted) {
-                const answerStr = typeof answer === "boolean" ? (answer ? "true" : "false") : answer;
-                bus.respond({
-                  id: prompt.id,
-                  answer: answerStr ?? undefined,
-                  cancelled: answerStr == null,
-                  source: "tui",
-                });
+            if (!ac.signal.aborted) {
+              const answerStr = typeof answer === "boolean" ? (answer ? "true" : "false") : answer;
+              // When the native ui method returned undefined without user
+              // interaction (RPC-mode no-op stub) AND a dashboard adapter
+              // claimed this prompt with a component, don't auto-cancel.
+              // Let the dashboard handle the prompt instead of winning the
+              // race with a spurious cancellation (#136 fresh-session cancel).
+              if (answerStr == null && bus.hasComponentClaim(prompt.id)) {
+                return;
               }
+              bus.respond({
+                id: prompt.id,
+                answer: answerStr ?? undefined,
+                cancelled: answerStr == null,
+                source: "tui",
+              });
+            }
             } catch (err) {
               if (!ac.signal.aborted) {
                 bus.respond({
@@ -2406,6 +2414,7 @@ function initBridge(pi: ExtensionAPI) {
           )
           .then((r) => (r.cancelled ? undefined : r.answer));
       (selectWrapper as any).__isPromptBusWrapper = true;
+      (selectWrapper as any).__pristineOriginal = originals.select;
       (ctx.ui as any).select = selectWrapper;
 
       const inputWrapper = (title: string, placeholder?: string, opts?: any) =>
@@ -2422,6 +2431,7 @@ function initBridge(pi: ExtensionAPI) {
           )
           .then((r) => (r.cancelled ? undefined : r.answer));
       (inputWrapper as any).__isPromptBusWrapper = true;
+      (inputWrapper as any).__pristineOriginal = originals.input;
       (ctx.ui as any).input = inputWrapper;
 
       // Persist pasted images for an ask_user input answer to disk + emit one
@@ -2492,6 +2502,7 @@ function initBridge(pi: ExtensionAPI) {
           )
           .then((r) => !r.cancelled && r.answer === "true");
       (confirmWrapper as any).__isPromptBusWrapper = true;
+      (confirmWrapper as any).__pristineOriginal = originals.confirm;
       (ctx.ui as any).confirm = confirmWrapper;
 
       const editorWrapper = (title: string, prefill?: string, opts?: any) =>
@@ -2508,6 +2519,7 @@ function initBridge(pi: ExtensionAPI) {
           )
           .then((r) => (r.cancelled ? undefined : r.answer));
       (editorWrapper as any).__isPromptBusWrapper = true;
+      (editorWrapper as any).__pristineOriginal = originals.editor;
       (ctx.ui as any).editor = editorWrapper;
 
       // ── Multiselect ──────────────────────────────────────────────
@@ -2597,6 +2609,7 @@ function initBridge(pi: ExtensionAPI) {
         });
       };
       (notifyWrapper as any).__isPromptBusWrapper = true;
+      (notifyWrapper as any).__pristineOriginal = originals.notify;
       (ctx.ui as any).notify = notifyWrapper;
     }
 
