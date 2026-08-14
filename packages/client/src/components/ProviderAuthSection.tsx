@@ -415,24 +415,28 @@ function ApiKeyRow({ provider, onChanged, showToast }: { provider: ProviderAuthS
       </div>
 
       {editing && (
-        <div className="flex items-center gap-2 mt-1">
+        <form onSubmit={(e) => { e.preventDefault(); handleSave(); }} className="flex items-center gap-2 mt-1">
           <input
             type="password"
             value={keyValue}
             onChange={(e) => setKeyValue(e.target.value)}
             placeholder={i18nT("gateway.pasteApiKey", undefined, "Paste API key…")}
             className="flex-1 px-2 py-1 text-xs rounded bg-[var(--bg-secondary)] border border-[var(--border-secondary)] text-[var(--text-primary)] placeholder-[var(--text-muted)] font-mono"
-            onKeyDown={(e) => { if (e.key === "Enter") handleSave(); }}
             autoFocus
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            data-lpignore="true"
           />
-          <button onClick={handleSave} disabled={busy || !keyValue.trim()} className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50">
+          <button type="submit" disabled={busy || !keyValue.trim()} className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50">
             <Icon path={mdiContentSave} size={0.5} />
             {i18nT("common.save2", undefined, "Save")}
           </button>
-          <button onClick={() => { setEditing(false); setKeyValue(""); }} className="px-2 py-1 text-xs rounded bg-[var(--bg-secondary)] text-[var(--text-muted)]">
+          <button type="button" onClick={() => { setEditing(false); setKeyValue(""); }} className="px-2 py-1 text-xs rounded bg-[var(--bg-secondary)] text-[var(--text-muted)]">
             {i18nT("common.cancel", undefined, "Cancel")}
           </button>
-        </div>
+        </form>
       )}
 
       {error && (

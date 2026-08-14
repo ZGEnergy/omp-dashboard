@@ -89,7 +89,7 @@ function RunStep({
           {t("gateway.setup.runsServerSide", undefined, "runs server-side")}
         </span>
       </div>
-      <div className="flex items-center gap-2">
+      <form onSubmit={(e) => { e.preventDefault(); if (!busy && (!needsParam || param.trim().length > 0)) void run(); }} className="flex items-center gap-2">
         {needsParam && (
           <input
             type="password"
@@ -98,6 +98,11 @@ function RunStep({
             className="flex-1 rounded border border-[var(--border)] bg-[var(--bg-secondary)] px-2 py-1 font-mono text-[11.5px] text-[var(--text-primary)]"
             value={param}
             onChange={(e) => setParam(e.target.value)}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            data-lpignore="true"
           />
         )}
         <button
@@ -115,7 +120,7 @@ function RunStep({
                 ? t("gateway.setup.connect", undefined, "Connect")
                 : t("gateway.setup.authenticate", undefined, "Authenticate")}
         </button>
-      </div>
+      </form>
       {msg && (
         <p className="mt-1 text-[11px] text-[var(--danger,#ef4444)]" data-testid="gateway-setup-error">
           {msg}

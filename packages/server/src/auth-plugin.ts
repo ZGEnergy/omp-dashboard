@@ -2,27 +2,28 @@
  * Fastify plugin that registers OAuth auth routes and the onRequest hook.
  * Only registered when auth is configured.
  */
-import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import cookie from "@fastify/cookie";
+
 import crypto from "node:crypto";
 import type { AuthConfig } from "@blackbelt-technology/pi-dashboard-shared/config.js";
+import cookie from "@fastify/cookie";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import {
-  type ResolvedProvider,
-  type TokenPayload,
-  buildProviderRegistry,
-  ensureAuthSecret,
-  signToken,
-  verifyToken,
-  parseAuthCookie,
-  isUserAllowed,
-  buildRedirectUri,
   buildAuthorizeUrl,
+  buildProviderRegistry,
+  buildRedirectUri,
+  COOKIE_NAME,
+  ensureAuthSecret,
   exchangeCode,
   fetchUserInfo,
-  COOKIE_NAME,
+  isUserAllowed,
+  parseAuthCookie,
+  type ResolvedProvider,
+  signToken,
+  type TokenPayload,
+  verifyToken,
 } from "./auth.js";
-import { isBypassedHost, isGenuinelyLocal } from "./localhost-guard.js";
 import { verifyLocalToken } from "./local-token.js";
+import { isBypassedHost, isGenuinelyLocal } from "./localhost-guard.js";
 import { PUBLIC_PAIRING_PREFIXES } from "./routes/pairing-routes.js";
 import type { WsRouteScope } from "./ws-ticket.js";
 
@@ -75,7 +76,7 @@ function decodeState(state: string): { returnUrl: string } {
 /**
  * Simple login page HTML with provider links.
  */
-function renderLoginPage(providers: ResolvedProvider[], error?: string): string {
+export function renderLoginPage(providers: Pick<ResolvedProvider, "key" | "name">[], error?: string): string {
   const providerLinks = providers
     .map((p) => `<a href="/auth/start/${p.key}" style="display:block;margin:10px 0;padding:12px 24px;background:#2563eb;color:#fff;text-decoration:none;border-radius:6px;text-align:center;font-size:16px;">Sign in with ${p.name}</a>`)
     .join("\n");
@@ -85,7 +86,7 @@ function renderLoginPage(providers: ResolvedProvider[], error?: string): string 
     : "";
 
   return `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>PI Dashboard — Sign In</title>
 <style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0f172a;color:#e2e8f0;}
 .card{background:#1e293b;padding:40px;border-radius:12px;max-width:400px;width:100%;text-align:center;}
@@ -96,10 +97,10 @@ h1{margin:0 0 24px;font-size:24px;}</style>
 /**
  * Access denied page HTML.
  */
-function renderDeniedPage(email: string): string {
+export function renderDeniedPage(email: string): string {
   const safeEmail = escapeHtml(email);
   return `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>PI Dashboard — Access Denied</title>
 <style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0f172a;color:#e2e8f0;}
 .card{background:#1e293b;padding:40px;border-radius:12px;max-width:400px;width:100%;text-align:center;}
