@@ -49,6 +49,32 @@ describe("ctx.ui session_start re-patch & error handling regression (#115)", () 
     warnSpy.mockRestore();
   });
 
+  it("rebuilds a poisoned process-cache entry written without a cleanCapture tag (#136b)", async () => {
+    // Simulate the long-running-process bug: a PRE-#136 code path stored a
+    // wrapper (not the true native) as the "original" under the process-wide
+    // WeakMap, without a cleanCapture marker. A stale entry like this survives
+    // an extension reload and, if trusted, makes the TUI arm call a wrapper →
+    // abort→cancel→abort cascade (RangeError on session exit).
+    const wrapperStoredByPre136Code = vi.fn();
+    (wrapperStoredByPre136Code as any).__isPromptBusWrapper = true;
+
+    const ui = { select: wrapperStoredByPre136Code };
+    const proc = process as unknown as Record<string, WeakMap<object, unknown> | undefined>;
+    const key = "__pi_dashboard_pristine_ui__";
+    const map = proc[key] ?? (proc[key] = new WeakMap<object, unknown>());
+    // Poison: entry exists (cache HIT on next call) but lacks cleanCapture:true.
+    map.set(ui, { originals: { select: wrapperStoredByPre136Code } });
+
+    // Next capture must NOT trust the poisoned entry — it must rebuild by
+    // unwrapping this iteration's ui methods. It cannot recover the native
+    // (the poisoned wrapper has no stash), so it must degrade to undefined
+    // rather than return the wrapper as the "original".
+    const orig = getOrCreatePristineOriginals(ui);
+    expect(orig.select).toBeUndefined();
+    // And a subsequent call is idempotent (rebuilt entry now cleanCapture).
+    const orig2 = getOrCreatePristineOriginals(ui);
+    expect(orig2.select).toBeUndefined();
+  });
   it("recovers the true native from an already-wrapped method via __pristineOriginal stash (#136)", async () => {
     const nativeSelect = vi.fn().mockResolvedValue("option1");
     // Simulates a wrapper installed by a previous bridge incarnation: tagged,

@@ -2223,17 +2223,31 @@ function initBridge(pi: ExtensionAPI) {
             try {
               let answer: string | boolean | undefined;
 
-              if (prompt.type === "select" && prompt.options && originals.select) {
-                answer = await originals.select(prompt.question, prompt.options, { signal: ac.signal });
-              } else if (prompt.type === "input" && originals.input) {
-                answer = await originals.input(prompt.question, prompt.defaultValue || "", { signal: ac.signal });
-              } else if (prompt.type === "confirm" && originals.confirm) {
-                answer = await originals.confirm(prompt.question, "", { signal: ac.signal });
-              } else if (prompt.type === "editor" && originals.editor) {
-                answer = await originals.editor(prompt.question, prompt.defaultValue || "", { signal: ac.signal });
-              } else if (prompt.type === "batch") {
-                // Multi-question wizard is dashboard-first. On pure TUI there was
-                // previously no arm, so `ui.batch` (used by bridge `ask` for 2+
+              // If the captured "original" is itself a PromptBus wrapper (stale
+              // poisoned cache — #136b), calling it with ac.signal wires our own
+              // abort into a nested bus.request → cancel → abort → cancel
+              // cascade on exit. CleanCapture rebuilds the weakmap entry, but
+              // guard here too so a wrapper can never re-enter the bus from the
+              // TUI arm.
+              const isWrapper = (fn: unknown): boolean =>
+                typeof fn === "function" &&
+                ((fn as { __isPromptBusWrapper?: boolean }).__isPromptBusWrapper === true);
+              const pick = <T>(fn: T | undefined): T | undefined =>
+                isWrapper(fn) ? undefined : fn;
+
+              const originalsSelect = pick(originals.select);
+              const originalsInput = pick(originals.input);
+              const originalsConfirm = pick(originals.confirm);
+              const originalsEditor = pick(originals.editor);
+          if (prompt.type === "select" && prompt.options && originalsSelect) {
+            answer = await originalsSelect(prompt.question, prompt.options, { signal: ac.signal });
+          } else if (prompt.type === "input" && originalsInput) {
+            answer = await originalsInput(prompt.question, prompt.defaultValue || "", { signal: ac.signal });
+          } else if (prompt.type === "confirm" && originalsConfirm) {
+            answer = await originalsConfirm(prompt.question, "", { signal: ac.signal });
+          } else if (prompt.type === "editor" && originalsEditor) {
+            answer = await originalsEditor(prompt.question, prompt.defaultValue || "", { signal: ac.signal });
+          } else if (prompt.type === "batch") {
                 // questions and by ask_user method:batch) hung forever with no
                 // selector and Esc only aborted the agent turn — not the bus.
                 // Sequential originals.* keeps TUI interactive and still races
@@ -2267,8 +2281,8 @@ function initBridge(pi: ExtensionAPI) {
                     )
                     .filter((label) => label.length > 0);
 
-                  if (method === "confirm" && originals.confirm) {
-                    const yes = await originals.confirm(title, "", { signal: ac.signal });
+                  if (method === "confirm" && originalsConfirm) {
+                    const yes = await originalsConfirm(title, "", { signal: ac.signal });
                     if (yes === undefined || ac.signal.aborted) {
                       cancelled = true;
                       break;
@@ -2277,9 +2291,9 @@ function initBridge(pi: ExtensionAPI) {
                     continue;
                   }
 
-                  if ((method === "input" || options.length === 0) && originals.input) {
+                  if ((method === "input" || options.length === 0) && originalsInput) {
                     const placeholder = typeof q.placeholder === "string" ? q.placeholder : "";
-                    const text = await originals.input(title, placeholder, { signal: ac.signal });
+                    const text = await originalsInput(title, placeholder, { signal: ac.signal });
                     if (text === undefined || ac.signal.aborted) {
                       cancelled = true;
                       break;
@@ -2288,8 +2302,8 @@ function initBridge(pi: ExtensionAPI) {
                     continue;
                   }
 
-                  if (originals.select && options.length > 0) {
-                    const picked = await originals.select(title, options, { signal: ac.signal });
+                  if (originalsSelect && options.length > 0) {
+                    const picked = await originalsSelect(title, options, { signal: ac.signal });
                     if (picked === undefined || ac.signal.aborted) {
                       cancelled = true;
                       break;
