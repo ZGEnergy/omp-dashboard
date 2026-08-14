@@ -1,11 +1,10 @@
-import { isInputNeededTool } from "@blackbelt-technology/pi-dashboard-shared/input-needed-tools.js";
 import { type ClaimEntry, CurrentPluginLayer, forToolName } from "@blackbelt-technology/dashboard-plugin-runtime";
 import { useSlotRegistryOrNull } from "@blackbelt-technology/dashboard-plugin-runtime/context";
+import { isInputNeededTool } from "@blackbelt-technology/pi-dashboard-shared/input-needed-tools.js";
+import type { ToolCallStub } from "@blackbelt-technology/pi-dashboard-shared/replay-projection.js";
 import { mdiAlert, mdiAlertCircle, mdiCheck, mdiChevronDown, mdiChevronRight, mdiHelpCircleOutline, mdiLoading, mdiStop } from "@mdi/js";
 import { Icon } from "@mdi/react";
 import React, { type ReactNode, useState } from "react";
-import type { ToolCallStub } from "@blackbelt-technology/pi-dashboard-shared/replay-projection.js";
-import { ToolStubRow } from "./ToolStubRow.js";
 import { useMobile } from "../hooks/useMobile.js";
 import { useToolFullResult } from "../hooks/useToolFullResult.js";
 import type { ChatImage } from "../lib/event-reducer.js";
@@ -14,6 +13,7 @@ import { t as i18nT } from "../lib/i18n";
 import { getSummary } from "../lib/tool-summary.js";
 import { ElapsedBadge } from "./ElapsedBadge.js";
 import { ErrorBoundary } from "./ErrorBoundary.js";
+import { ToolStubRow } from "./ToolStubRow.js";
 import { getToolRenderer, type ToolContext } from "./tool-renderers/index.js";
 
 /**
@@ -90,7 +90,7 @@ export function ToolCallStep({ toolName, toolCallId, args, status, result, image
   const isMobile = useMobile();
   const hasImages = images && images.length > 0;
   const isAgentRunning = toolName === "Agent" && status === "running";
-  const isInputTool = isInputNeededTool(toolName);
+  const isInputTool = isInputNeededTool(toolName, args);
   const isFailedInputTool = isInputTool && status === "error";
   const [expanded, setExpanded] = useState(hasImages || isAgentRunning || (isInputTool && !isFailedInputTool));
   const [stopState, setStopState] = useState<StopState>("idle");

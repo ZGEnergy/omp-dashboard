@@ -604,6 +604,7 @@ export function wireEvents(deps: EventWiringDeps): void {
       const beforeSnapshot = {
         status: sessionBefore?.status,
         currentTool: sessionBefore?.currentTool,
+        currentToolArgs: sessionBefore?.currentToolArgs,
       };
 
       const updates = extractSessionUpdates(msg.event);
@@ -623,7 +624,10 @@ export function wireEvents(deps: EventWiringDeps): void {
       if (
         !replayingSessions.has(sessionId) &&
         msg.event.eventType === "tool_execution_end" &&
-        isInputNeededTool((msg.event.data?.toolName as string | undefined) ?? null)
+        isInputNeededTool(
+          (msg.event.data?.toolName as string | undefined) ?? null,
+          (msg.event.data?.args ?? msg.event.data?.params) as Record<string, unknown> | undefined,
+        )
       ) {
         const toolCallId =
           typeof msg.event.data?.toolCallId === "string" ? msg.event.data.toolCallId : undefined;
@@ -650,6 +654,7 @@ export function wireEvents(deps: EventWiringDeps): void {
         const afterSnapshot = {
           status: sessionAfter?.status,
           currentTool: sessionAfter?.currentTool,
+          currentToolArgs: sessionAfter?.currentToolArgs,
         };
         if (
           isUnreadTrigger(
@@ -699,8 +704,8 @@ export function wireEvents(deps: EventWiringDeps): void {
         if (placed && placed.status !== "ended") {
           const askTrigger =
             !!isQuestionFirst?.() &&
-            isInputNeededTool(placed.currentTool) &&
-            !isInputNeededTool(beforeSnapshot.currentTool);
+            isInputNeededTool(placed.currentTool, placed.currentToolArgs) &&
+            !isInputNeededTool(beforeSnapshot.currentTool, beforeSnapshot.currentToolArgs);
           const endTrigger =
             !!isCompletedFirst?.() && msg.event.eventType === "agent_end";
           if (askTrigger || endTrigger) {

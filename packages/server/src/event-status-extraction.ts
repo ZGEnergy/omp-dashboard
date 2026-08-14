@@ -2,13 +2,15 @@
  * Extract session status/tool updates from forwarded events.
  * Returns partial DashboardSession updates, or null if the event is not relevant.
  */
+
+import { isInputNeededTool, isProposeWrite } from "@blackbelt-technology/pi-dashboard-shared/input-needed-tools.js";
 import type { DashboardEvent, DashboardSession, SessionStatus } from "@blackbelt-technology/pi-dashboard-shared/types.js";
-import { isInputNeededTool } from "@blackbelt-technology/pi-dashboard-shared/input-needed-tools.js";
 
 // Use null (not undefined) for fields that must be cleared — undefined is
 // dropped during JSON serialisation so the browser would keep the stale value.
 type SessionUpdates = Partial<Pick<DashboardSession, "status">> & {
   currentTool?: string | null;
+  currentToolArgs?: Record<string, unknown> | null;
 };
 
 /**
@@ -56,16 +58,45 @@ export function extractStatsFromEvents(
 export function extractSessionUpdates(event: DashboardEvent): SessionUpdates | null {
   switch (event.eventType) {
     case "agent_start":
-      return { status: "streaming", currentTool: null };
+      return { status: "streaming", currentTool: null, currentToolArgs: null };
 
     case "agent_end":
-      return { status: "idle", currentTool: null };
+      return { status: "idle", currentTool: null, currentToolArgs: null };
 
-    case "tool_execution_start":
-      return { currentTool: (event.data.toolName as string) ?? null };
+    case "tool_call": {
+      const toolName =
+        (event.data?.toolName as string | undefined) ??
+        (event.data?.name as string | undefined) ??
+        null;
+      const toolArgs =
+        (event.data?.input as Record<string, unknown> | undefined) ??
+        (event.data?.args as Record<string, unknown> | undefined) ??
+        (event.data?.params as Record<string, unknown> | undefined) ??
+        null;
+      if (isProposeWrite(toolName, toolArgs)) {
+        return {
+          currentTool: toolName,
+          currentToolArgs: toolArgs,
+        };
+      }
+      return null;
+    }
+
+    case "tool_execution_start": {
+      const toolArgs =
+        (event.data?.args as Record<string, unknown> | undefined) ??
+        (event.data?.params as Record<string, unknown> | undefined) ??
+        (event.data?.input as Record<string, unknown> | undefined) ??
+        null;
+      return {
+        currentTool: (event.data?.toolName as string) ?? null,
+        currentToolArgs: toolArgs,
+      };
+    }
 
     case "tool_execution_end":
-      return { currentTool: null };
+    case "tool_result":
+      return { currentTool: null, currentToolArgs: null };
 
     // Flow / architect events are NOT extracted here. Per change
     // pluginize-flows-via-registry, flows-plugin owns its own state
@@ -127,6 +158,7 @@ export function isActivityEvent(eventType: string): boolean {
 export interface UnreadTriggerSnapshot {
   status?: SessionStatus;
   currentTool?: string | null;
+  currentToolArgs?: Record<string, unknown> | null;
 }
 
 /**
@@ -162,7 +194,12 @@ export function isUnreadTrigger(
 
   // Trigger 2: currentTool flips to an input-needed tool (dashboard ask_user
   // or OMP/pi core `ask` — Claude Code AskUserQuestion analogue).
-  if (isInputNeededTool(after.currentTool) && !isInputNeededTool(before.currentTool)) {
+  // Trigger 2: currentTool flips to an input-needed tool (dashboard ask_user,
+  // core ask, or write xd://propose).
+  if (
+    isInputNeededTool(after.currentTool, after.currentToolArgs) &&
+    !isInputNeededTool(before.currentTool, before.currentToolArgs)
+  ) {
     return true;
   }
 

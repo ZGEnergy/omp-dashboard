@@ -13,6 +13,7 @@ import { useDelayedSkeleton } from "../hooks/useDelayedSkeleton.js";
 import { useDisplayPrefs } from "../hooks/useDisplayPrefs.js";
 import { useFxVisibility } from "../hooks/useFxVisibility.js";
 import { useMobile } from "../hooks/useMobile.js";
+import type { ToolPayloadController } from "../hooks/useToolPayloads.js";
 import { buildSelectionClipboardText } from "../lib/chat-selection-copy.js";
 import { buildTurnToFirstRowIndex, computeRowTextChars, type DisplayRow, estimateVirtualRowSize, extendRangeWithSelection, interleaveEvictedBursts, isBurst, isEvictedBurst, isGroup, lowestVisibleSeq, rangeToRowIndexSpan, rowSeq, type SelectionRowSpan, virtualRowKey } from "../lib/chat-virtual-rows.js";
 import { findActiveInteractiveToolResultIds, findRetriedErrorIds, findSurfaceSuppressedErrorIds } from "../lib/collapse-retried-errors.js";
@@ -23,7 +24,6 @@ import type { ChatImage, EvictedToolBurst, InteractiveUiRequest, SessionState } 
 import { formatMessageTime } from "../lib/format.js";
 import { type BurstItem, groupToolBursts, type ToolBurstGroup as ToolBurstGroupData } from "../lib/group-tool-bursts.js";
 import type { ToolCallGroup } from "../lib/group-tool-calls.js";
-import type { ToolPayloadController } from "../hooks/useToolPayloads.js";
 import { t as i18nT } from "../lib/i18n";
 import { buildTurnSummaries, type TurnSummary } from "../lib/lineDelta.js";
 import { isOutOfCwd, normalizeUnderCwd } from "../lib/normalize-path.js";
@@ -33,9 +33,9 @@ import { ChangeSummaryBlock } from "./ChangeSummaryBlock.js";
 import { CollapsedToolGroup } from "./CollapsedToolGroup.js";
 import { CommandFeedbackCard } from "./CommandFeedbackCard.js";
 import { CopyButton } from "./CopyButton.js";
-import { ForkFromHereButton } from "./ForkFromHereButton.js";
 import { MissingToolInlineError } from "./chat/MissingToolInlineError.js";
 import { FilePreviewHost, FilePreviewProvider } from "./FilePreviewContext.js";
+import { ForkFromHereButton } from "./ForkFromHereButton.js";
 import { ImageLightbox } from "./ImageLightbox.js";
 import { InlineTerminalCard } from "./InlineTerminalCard.js";
 import { getInteractiveRenderer } from "./interactive-renderers/registry.js";
@@ -1612,7 +1612,7 @@ const ChatViewInner = forwardRef<ChatViewHandle, Props>(function ChatView({ sess
               duration={msg.duration}
               toolDetails={msg.toolDetails}
               toolStub={msg.toolStub}
-              showResultBody={prefs.toolResults || isInputNeededTool(msg.toolName)}
+              showResultBody={prefs.toolResults || isInputNeededTool(msg.toolName, msg.args)}
               onAbort={msg.toolStatus === "running" ? onAbort : undefined}
               onForceKill={msg.toolStatus === "running" ? onForceKill : undefined}
             />

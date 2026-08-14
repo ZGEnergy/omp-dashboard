@@ -168,7 +168,7 @@ export function ToolBurstGroup({ burst, toolContext }: Props) {
     setOverride(burstId ? completedBurstOverrides.get(burstId) ?? null : null);
   }, [burstId]);
   const isRunning = visibleMembers.some((m) => m.toolStatus === "running");
-  const hasInputNeededTool = visibleMembers.some((m) => isInputNeededTool(m.toolName));
+  const hasInputNeededTool = visibleMembers.some((m) => isInputNeededTool(m.toolName, m.args));
   // Input-needed tools must remain immediately actionable even when the user's
   // default collapses ordinary tool groups. An explicit user toggle still wins.
   const expanded = override ?? (hasInputNeededTool || !prefs.toolGroupDefaultCollapsed);
@@ -314,7 +314,7 @@ function BurstBodyItem({
       duration={msg.duration}
       toolDetails={msg.toolDetails}
       toolStub={msg.toolStub}
-      showResultBody={prefs.toolResults || isInputNeededTool(msg.toolName)}
+      showResultBody={prefs.toolResults || isInputNeededTool(msg.toolName, msg.args)}
     />
   );
 }

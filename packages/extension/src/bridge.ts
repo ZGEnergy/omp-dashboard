@@ -37,6 +37,7 @@ import { registerCanvasTool } from "./canvas-tool.js";
 import { createCommandHandler, tryExecSlashTemplate } from "./command-handler.js";
 import { buildSessionContextText, runForkSubagentDraft } from "./commit-draft-agent.js";
 import { ConnectionManager } from "./connection.js";
+import { getOrCreatePristineOriginals } from "./ctx-ui-originals.js";
 import { registerDashboardContextInjector } from "./dashboard-context-injector.js";
 import { DashboardDefaultAdapter } from "./dashboard-default-adapter.js";
 import { runDevBuild } from "./dev-build.js";
@@ -60,7 +61,7 @@ import { collectMetrics, startMetricsMonitor, stopMetricsMonitor } from "./proce
 import { getOwnPgid, scanChildProcesses } from "./process-scanner.js";
 import { PromptBus } from "./prompt-bus.js";
 import { expandPromptTemplateFromDisk } from "./prompt-expander.js";
-import { getOrCreatePristineOriginals } from "./ctx-ui-originals.js";
+import { registerProposeTool } from "./propose-tool.js";
 
 import {
   activate as activateProviderRegister,
@@ -274,6 +275,7 @@ export default function (pi: ExtensionAPI) {
     // the companion interactive tool at the same boundary. Non-dashboard
     // sessions retain runtime registration to avoid static-name conflicts.
     if (dashboardSpawnedAtFactory) registerAskUserTool(pi);
+
 
     initBridge(pi);
   } catch (err) {
@@ -2146,6 +2148,15 @@ function initBridge(pi: ExtensionAPI) {
     // live getter so its refs match the human Model Selector exactly.
     // See change: add-agent-role-model-tools.
     registerRoleModelTools(pi, { getRegistry: () => cachedModelRegistry });
+    /**
+     * Architecture Note & Core Gap:
+     * The `@oh-my-pi` TUI `#approvePlan` / `handlePlanApproval` continuation lives outside
+     * `omp-dashboard` and is external/unreachable.
+     * The plan-approval host for `write xd://propose` is implemented directly in
+     * `omp-dashboard` via `registerProposeTool`, issuing PromptBus `prompt_request` select prompts
+     * and dispatching approval via `onPlanApproved` / `pi.events.emit("plan:approved", ...)`.
+     */
+    registerProposeTool(pi, () => promptBus);
 
     // Extract session file/dir early — needed for source detection and UI proxy
     const sessionFile = ctx.sessionManager.getSessionFile?.() ?? undefined;
