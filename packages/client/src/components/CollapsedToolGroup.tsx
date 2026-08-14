@@ -12,6 +12,7 @@ import { useDisplayPrefs } from "../hooks/useDisplayPrefs.js";
 import { useMobile } from "../hooks/useMobile.js";
 import type { ToolCallGroup } from "../lib/group-tool-calls.js";
 import { getSummary } from "../lib/tool-summary.js";
+import { unwrapXdToolCall } from "../lib/unwrap-xd.js";
 import { MarkdownContent } from "./MarkdownContent.js";
 import { ToolCallStep } from "./ToolCallStep.js";
 import type { ToolContext } from "./tool-renderers/index.js";
@@ -33,21 +34,21 @@ export function CollapsedToolGroup({ group, toolContext }: Props) {
     return key === null || prefs.toolCalls[key];
   });
   if (visibleMessages.length === 0) return null;
-  const lastMsg = group.messages[group.messages.length - 1];
-  const firstArgs = group.messages[0]?.args;
+  const firstMsg = group.messages[0];
+  const { effectiveToolName, effectiveArgs } = unwrapXdToolCall(group.toolName, firstMsg?.args, firstMsg?.toolDetails);
 
   return (
     <div className={`${isMobile ? "mx-2" : "mx-4"} border-l-2 border-[var(--border-secondary)] pl-3`}>
       <button
         onClick={() => setExpanded(!expanded)}
-        title={getSummary(group.toolName, firstArgs)}
+        title={getSummary(effectiveToolName, effectiveArgs)}
         className={`flex items-center gap-1.5 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] w-full text-left ${isMobile ? "min-h-[44px] py-2" : ""}`}
         data-testid="collapsed-group"
       >
         <span className="inline-flex text-[var(--text-muted)]">
           <Icon path={mdiRepeat} size={0.55} />
         </span>
-        <span className="truncate">{getSummary(group.toolName, firstArgs)}</span>
+        <span className="truncate">{getSummary(effectiveToolName, effectiveArgs)}</span>
         <span className="ml-1 px-1.5 py-0.5 rounded-full bg-[var(--bg-tertiary)] text-[var(--text-muted)] text-[10px] font-medium">
           ×{visibleMessages.length}
         </span>
